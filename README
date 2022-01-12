@@ -1,0 +1,22 @@
+Dependencies
+- X11 (obviously)
+- Xft and freetype2 (likely installed)
+- xdotool (commands to the window manager, window geometry querying)
+- xprop (get the list of virtual desktop names, get stacking list of window IDs)
+- bash, sed, awk, cut (string manipulation of xdotool and xprop)
+
+Limitations
+- Loading data could technically be done in the C code, but I hate C strings and wanted to do as little string processing as possible.
+- The window set is statically loaded once.  This means no window moving/new windows/window closing will be tracked. 
+- Filtering limited to alphanumeric characters until I figure out how unicode keylogging works.
+- Number of desktops is statically defined.  Max number of windows is statically defined.
+  I don't have a dynamic array implementation and didn't want to get more frustrated with this language.
+- Currently relies on _NET_CLIENT_LIST_STACKING to determine which windows are above others. Pretty sure this is wrong
+
+Compromises
+- Had to use Xft.h in order to support UTF8 strings for workspace names (glyph/icon fonts).
+  This means depending on both the xft libs and the freetype2 fonts.  You __probably__ have these installed anyway.
+- Some inefficient pieces of code where associate arrays or tries would come in handy.  I don't know how to do these in C.
+
+Additional Notes
+- The UTF8 decoding was copied from another repository (TODO: find that link...)
