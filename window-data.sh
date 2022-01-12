@@ -10,7 +10,7 @@ do
 	geometry=$(xdotool getwindowgeometry --shell $windowId | cut -d '=' -f 2 | sed '1d;$d' | xargs)
 	desktop=$(xdotool get_desktop_for_window $windowId)
 	className=$(xprop WM_CLASS -id $windowId | cut -d '=' -f 2 | awk '{ gsub("\"","",$NF); print $NF }')
-	if [ ! $className ==  "mypager" ]; then 
+	if [ ! $className ==  "xdpager" ]; then 
 		echo $desktop $geometry $className $windowId
 	fi
 done

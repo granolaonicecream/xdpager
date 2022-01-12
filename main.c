@@ -176,8 +176,8 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
-	classHint->res_name = "mypager";
-	classHint->res_class = "mypager";
+	classHint->res_name = "xdpager";
+	classHint->res_class = "xdpager";
 	XSetClassHint(dpy, win, classHint);
 	XFree(classHint);
 
@@ -206,7 +206,7 @@ MiniWindow* getWindowData(unsigned short maxWindows, int *nWindows) {
 	// <desktop idx> <x> <y> <width> <height> <className> <windowID>
 	// the geometry is absolute positioning, so need to normalize for monitor resolutions
 	// TODO: apparently popen isn't standard. replace later
-	fp = (FILE*) popen("/home/archie/ctest/window-data.sh", "r");
+	fp = (FILE*) popen("/home/archie/xdpager/window-data.sh", "r");
 	if (fp == NULL)
 		exit(1);
 	while (fgets(line, PARSE_MAX, fp) != NULL)
