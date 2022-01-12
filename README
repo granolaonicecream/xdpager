@@ -1,3 +1,11 @@
+This is very much a POC for an XFCE-style window pager.  It's also my first C program so I don't know what I'm doing.
+All the configuration is hardcoded right now, but it should be mostly obvious
+
+Installation
+- Update the hardcoded path to window-data.sh in main.c to the absolute location on your system.  I'll fix this eventually
+- Run `make`
+- Execute `pager` or hook it up to your window manager
+
 Dependencies
 - X11 (obviously)
 - Xft and freetype2 (likely installed)
