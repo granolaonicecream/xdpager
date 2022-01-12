@@ -1,5 +1,10 @@
-This is very much a POC for an XFCE-style window pager.  It's also my first C program so I don't know what I'm doing.
-All the configuration is hardcoded right now, but it should be mostly obvious
+This is very much a POC for an XFCE-style window pager.  It's also my first C program so I don't know what I'm doing.  All the configuration is hardcoded right now, but it should be mostly obvious
+
+Features
+- Shows a static view of the workspaces and windows on each when loaded
+- Clicking on a workspace or pressing Return to switch workspaces
+- Typing alpha characters allows searching for windows by their className (see xprop WM_CLASS)
+- Pressing Return when searching to focus the selected window
 
 Installation
 - Update the hardcoded path to window-data.sh in main.c to the absolute location on your system.  I'll fix this eventually
