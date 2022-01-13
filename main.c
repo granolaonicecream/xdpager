@@ -259,6 +259,31 @@ MiniWindow* getWindowData(unsigned short maxWindows, int *nWindows) {
 	return miniWindows;
 }
 
+// Window Managers like XMonad implement _NET_CLIENT_LIST_STACKING but don't meet the spec
+// Need to resort to be able to draw floting windows reliably
+// Compare against the actual stacking order provided by the root window
+void reorderWindows(Display* dpy, MiniWindow* previews, int nPreviews) {
+	Window root;
+	Window parent;
+	Window *children;
+	unsigned int nchildren;
+	XQueryTree(dpy, DefaultRootWindow(dpy), &root, &parent, &children, &nchildren);
+	int sortIdx = 0;
+	for (int a=0; a < nchildren; a++) {
+		for (int x=0;x<nPreviews;x++) {
+			if (previews[x].windowId == children[a]) {
+				// printf("Found match, swapping %d and %d\n", x, sortIdx);
+				MiniWindow tmp = previews[x];
+				previews[x] = previews[sortIdx];
+				previews[sortIdx] = tmp;
+				sortIdx++;
+				break;
+			}
+		}
+
+	}
+}
+
 char** getWorkspaceNames(Display* dpy, int screen, int nWorkspaces) {
 	Atom prop = XInternAtom(dpy,"_NET_DESKTOP_NAMES",False);
 	Atom utf8String = XInternAtom(dpy,"UTF8_STRING",False);
@@ -394,6 +419,7 @@ int main(int argc, char *argv[]) {
 	unsigned short maxWindows = 30;      // Maximum number of windows to preview (TODO: dynamic arrays)
 	int total = 0;                       // Total number of windows actually parsed
 	int margin = 1;                      // An amount to pad windows with for visual clarity (Might not be necessary anymore with border drawing)
+	char unreliableEwmhClientListStacking = 1;
 	SearchContext* search = malloc(sizeof(SearchContext));
 	search->buffer = malloc(20 * sizeof(char)); // buffer for searching by text
 	search->selectedWindow = NULL;		// Give it a sensible default instead of random memory
@@ -440,6 +466,9 @@ int main(int argc, char *argv[]) {
 	// Geometry for each set of windows should be relative to its display's origin
 	MiniWindow* miniWindows = getWindowData(maxWindows, &total);
 	
+	if (unreliableEwmhClientListStacking) 	
+		reorderWindows(dpy, miniWindows, total);
+
 	// Collect all this shit together for organization
 	Model* model = malloc(sizeof(Model));
 	model->workspaces = workspaces;
