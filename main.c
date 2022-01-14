@@ -37,6 +37,7 @@ typedef struct {
 	MiniWindow* selectedWindow; // pointer to the currently selected MiniWindow
 	MiniWindow** matchedWindows; // array of MiniWindows that match search filter
 	unsigned short nMatched;
+	char* prefix; // a prefix string to indicate search mode is active
 } SearchContext;
 
 typedef struct {
@@ -48,7 +49,9 @@ typedef struct {
 	unsigned short nWorkspaces; // size of workspaces
 	int selected; // index of currently selected workspace
 	SearchContext* search; // the current search string
+	char mode; // current mode of the pager.  0 - workspace, 1 - className search, 2 - ???
 	
+	int workspacesPerRow;
 	Window mainWindow; // for drawing the search string
 } Model;
 
@@ -124,8 +127,11 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 	// Quick clear of all child windows to cleanup selected border
 	// Background is reset in case selected has changed
 	for(i=0;i<nWorkspaces;++i) {
-		XSetWindowBackground(dpy, workspaces[i], search->size > 0 || i != selected ? 
-				colorsCtx->pixels[2] : colorsCtx->pixels[0]);
+		long pixel = colorsCtx->pixels[2]; // default bg
+		if (m->mode == 0 && i == selected) {
+			pixel = colorsCtx->pixels[0]; // selected workspace in workspace mode
+		}
+		XSetWindowBackground(dpy, workspaces[i], pixel);
 		XClearWindow(dpy,workspaces[i]);
 	}
 
@@ -133,20 +139,24 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 	for(i=0; i<nPreviews; ++i) {
 		MiniWindow mw = previews[i];
 		if (mw.workspace < nWorkspaces) {
-			//printf("drawing rect %d (%d %d %d %d)\n",mw->workspace,mw->x,mw->y,mw->w,mw->h);
-			XFillRectangle(dpy, workspaces[mw.workspace], colorsCtx->normal, mw.x,mw.y,mw.w,mw.h);
-			// outline the window we just drew for floating windows
+			GC fillGC = colorsCtx->normal;
 			GC outlineGC = colorsCtx->workspace;
-			if(search->size > 0) {
+			if (m->mode == 1 && search->size > 0) {
 				if (&previews[i] == search->selectedWindow) {
+					fillGC = colorsCtx->selected;
 					outlineGC = colorsCtx->matched;
 				} else if (strncmp(mw.className,search->buffer,search->size) == 0) {
 					outlineGC = colorsCtx->selected;	
 				}
-				// no change if a search string and no match
-			} else if (mw.workspace == selected){
+
+			} else if (m->mode == 0 && mw.workspace == selected) {
+				// Outline windows on the selected workspace in workspace mode
+				// This lets us see floating windows
 				outlineGC = colorsCtx->selected;
 			}
+
+			//printf("drawing rect %d (%d %d %d %d)\n",mw->workspace,mw->x,mw->y,mw->w,mw->h);
+			XFillRectangle(dpy, workspaces[mw.workspace], fillGC, mw.x,mw.y,mw.w,mw.h);
 			XDrawRectangle(dpy, workspaces[mw.workspace], outlineGC, mw.x,mw.y,mw.w,mw.h);
 		}
 	}
@@ -159,8 +169,14 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 
 	// TODO: customize where search string is drawn
 	// Draw search string after everything to ensure it's on top
-	drawUtfText(dpy, m->draws[0], colorsCtx->fonts + 2, 1, colorsCtx->fontColor, 10,20,
-			search->buffer, search->size, 0);
+	if (m->mode == 1) {
+		int prefixLen = strlen(search->prefix);
+		char sstring[search->size+prefixLen];
+		strcpy(sstring, search->prefix);
+		strcat(sstring,search->buffer);
+		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 10,20,
+			sstring, search->size + prefixLen, 0);
+	}
 }
 
 Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow) {
@@ -172,7 +188,7 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 		nRows += 1;
 	int height = (90+5) * nRows  + 10;
 	
-	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 0, width, height, 
+	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 20, width, height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
@@ -406,6 +422,92 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	
 	return ctx;
 }
+
+// Handle a keypress in the workspace mode
+// returns whether or not we should exit afterwards
+int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
+	
+	if (sym == XK_Escape) {
+		return 1;
+	} else if (sym == XK_Right || sym == XK_l) {
+		model->selected = (model->selected + 1) % model->nWorkspaces;
+	} else if (sym == XK_Left || sym == XK_h) {
+		// Fuck it just branch
+		model->selected = model->selected == 0 ? model->nWorkspaces - 1 : model->selected - 1;
+	} else if (sym == XK_Down || sym == XK_j) {
+		model->selected = (model->selected + model->workspacesPerRow) % model->nWorkspaces;
+	} else if (sym== XK_Up || sym == XK_k) {
+		int tmp_s = model->selected - model->workspacesPerRow;
+		model->selected = tmp_s < 0 ? model->nWorkspaces + tmp_s : tmp_s;	
+	} else if (sym == XK_Return) {
+		char command[23*sizeof(char)];
+		sprintf(command, "xdotool set_desktop %d", model->selected);
+		system(command);
+		return 1;
+	} else if (sym == XK_slash) {
+		model->mode = 1; // switch to search mode
+	}
+
+	return 0;
+}
+
+// Handle a keypress in the search  mode
+// returns whether or not we should exit afterwards
+int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
+	
+	SearchContext* search = model->search;
+	if (sym == XK_Escape) {
+		if (search->size > 0) {
+			// If we have a search string, clear it instead of exiting
+			search->buffer[0] = '\0';
+			search->size = 0;
+			updateSearchContext(search, model->previews, model->nPreviews);
+		}
+		model->mode = 0; // switch back to workspace mode
+	} else if (sym == XK_Right) {
+		if (search->selectedWindow && search->size > 0) {
+			for(int k=0; k<search->nMatched; ++k) {
+				if (search->matchedWindows[k] == search->selectedWindow) {
+					search->selectedWindow = search->matchedWindows[(k+1)%search->nMatched];
+					break;
+				}
+			}
+		}
+	} else if (sym == XK_Left) {
+		if (search->selectedWindow && search->size > 0) {
+			for(int k=0; k<search->nMatched; ++k) {
+				if (search->matchedWindows[k] == search->selectedWindow) {
+					int idx = k == 0 ? search->nMatched - 1 : k -1;
+					search->selectedWindow = search->matchedWindows[idx];
+					break;
+				}
+			}
+		}
+	} else if (sym == XK_Return) {
+		if (search->selectedWindow && search->size > 0) {
+			char command[35*sizeof(char)];
+			sprintf(command, "xdotool windowactivate %ld", search->selectedWindow->windowId);
+			system(command);
+			return 1;
+		}
+	} else if ((sym >= XK_a && sym <= XK_z) || (sym >= XK_A && sym <= XK_Z)) {
+		if (search->size < 20) {
+			strncat(search->buffer, XKeysymToString(sym), 1);
+			search->size++;
+			updateSearchContext(search, model->previews, model->nPreviews);
+		}
+	} else if(sym == XK_BackSpace) {
+		if (search->size > 0) {
+			search->buffer[search->size-1] = '\0';
+			search->size--;
+			updateSearchContext(search, model->previews, model->nPreviews);
+		}
+	}
+
+	return 0;
+}
+
+
 int main(int argc, char *argv[]) {
 	Display *dpy;
 	int screen;
@@ -426,6 +528,7 @@ int main(int argc, char *argv[]) {
 	search->matchedWindows = malloc(maxWindows * sizeof(MiniWindow*)); // array for windows that match search string
 								       // Overeager alloc, but lol dynamic arrays
 	search->nMatched = 0;			// length of matchedWindows
+	search->prefix = "";
 
 	dpy = XOpenDisplay(NULL);
 	if (dpy == NULL) {
@@ -480,6 +583,8 @@ int main(int argc, char *argv[]) {
 	model->selected = 0;
 	model->search = search;
 	model->mainWindow = workspaces[0];
+	model->mode = 0;
+	model->workspacesPerRow = workspacesPerRow;
 
 	while(1) {
 		XNextEvent(dpy, &event);
@@ -495,70 +600,28 @@ int main(int argc, char *argv[]) {
 		if (event.type == KeyPress) {
 			KeySym sym = XLookupKeysym(&event.xkey, 0);
 			//printf("keycode %d %s\n", event.xkey.keycode, XKeysymToString(sym));
-			if (sym == XK_Escape) {
-				if (search->size > 0) {
-					// If we have a search string, clear it instead of exiting
-					search->buffer[0] = '\0';
-					search->size = 0;
-					updateSearchContext(search, model->previews, model->nPreviews);
-					redraw(dpy,screen,margin,colorsCtx,model);
-				} else {
+			int shouldExit = 0;
+			switch(model->mode) {
+				case 0:
+					shouldExit = workspaceKey(sym, model, colorsCtx);
 					break;
-				}
-			} else if (sym == XK_Right) {
-				if (search->selectedWindow && search->size > 0) {
-					for(int k=0; k<search->nMatched; ++k) {
-						if (search->matchedWindows[k] == search->selectedWindow) {
-							search->selectedWindow = search->matchedWindows[(k+1)%search->nMatched];
-							break;
-						}
-					}
-				} else {
-					model->selected = (model->selected + 1) % nWorkspaces;
-				}
-				redraw(dpy,screen,margin,colorsCtx,model);
-			} else if (sym == XK_Left) {
-				// Fuck it just branch
-				model->selected = model->selected == 0 ? nWorkspaces - 1 : model->selected - 1;
-				redraw(dpy,screen,margin,colorsCtx,model);
-			} else if (sym == XK_Down) {
-				model->selected = (model->selected + workspacesPerRow) % nWorkspaces;
-				redraw(dpy,screen,margin,colorsCtx,model);
-			} else if (sym== XK_Up) {
-				int tmp_s = model->selected - workspacesPerRow;
-				model->selected = tmp_s < 0 ? nWorkspaces + tmp_s : tmp_s;	
-				redraw(dpy,screen,margin,colorsCtx,model);
-			} else if (sym == XK_Return) {
-				if (search->selectedWindow && search->size > 0) {
-					char command[35*sizeof(char)];
-					sprintf(command, "xdotool windowactivate %ld", search->selectedWindow->windowId);
-					system(command);
+				case 1:
+					shouldExit = searchKey(sym, model, colorsCtx);
 					break;
-				} else {
-					char command[23*sizeof(char)];
-					sprintf(command, "xdotool set_desktop %d", model->selected);
-					system(command);
+				default: 
+					printf("Unknown mode %d\n",model->mode);
+					shouldExit = 1;
 					break;
-				}
-			} else if ((sym >= XK_a && sym <= XK_z) || (sym >= XK_A && sym <= XK_Z)) {
-				if (search->size < 20) {
-					strncat(search->buffer, XKeysymToString(sym), 1);
-					search->size++;
-					updateSearchContext(search, model->previews, model->nPreviews);
-					redraw(dpy,screen,margin,colorsCtx,model);
-				}
-			} else if(sym == XK_BackSpace) {
-				if (search->size > 0) {
-					search->buffer[search->size-1] = '\0';
-					search->size--;
-					updateSearchContext(search, model->previews, model->nPreviews);
-					redraw(dpy,screen,margin,colorsCtx,model);
-				}
 			}
+			if (shouldExit)
+				break; // goto cleanup
+			else
+				redraw(dpy,screen,margin,colorsCtx,model);
 		}
 		
 		// Mouse movement
-		if (event.type == MotionNotify) {
+		// Mouse selection of filtered windows not implemented. Would need to do geometry range checking
+		if (event.type == MotionNotify && model->mode == 0) {
 			int pWorkspace = findPointerWorkspace(event.xmotion.window, workspaces, nWorkspaces);
 			if (pWorkspace != model->selected){
 				model->selected = pWorkspace;
@@ -567,7 +630,7 @@ int main(int argc, char *argv[]) {
 		}
 
 		// If a childwindow is clicked, move to the workspace
-		if (event.type == ButtonRelease) {
+		if (event.type == ButtonRelease && model->mode == 0) {
 			for (i=0;i<nWorkspaces;++i) {
 				if (event.xany.window == workspaces[i]) {
 					break;
