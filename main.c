@@ -10,6 +10,19 @@
 #include <fontconfig/fontconfig.h>
 #include "utf8.h"
 
+#define NAV_NORMAL_SELECTION 0
+#define NAV_MOVE_WITH_SELECTION 1
+#define NAV_MOVE_WITH_SELECTION_EXPERIMENTAL 2
+
+char navType = NAV_NORMAL_SELECTION;
+
+typedef struct {
+	unsigned short nWorkspaces;      // Number of workspaces/desktops
+	unsigned short workspacesPerRow; // Number of workspaces to show per row
+	unsigned short maxWindows;      // Maximum number of windows to preview (TODO: dynamic arrays)
+	char* searchPrefix; // Prefix to show while in search mode
+} XDConfig;
+
 typedef struct {
 	int workspace;
 	int x;
@@ -54,6 +67,31 @@ typedef struct {
 	int workspacesPerRow;
 	Window mainWindow; // for drawing the search string
 } Model;
+
+// TODO: Move to a navigation file
+void setDesktopForWindow(Window win, int desktop) {
+	char command[50*sizeof(char)];
+	sprintf(command, "xdotool set_desktop_for_window %ld %d", win, desktop);
+	system(command);
+}
+
+void activateWindow(Window win) {
+	char command[35*sizeof(char)];
+	sprintf(command, "xdotool windowactivate %ld", win);
+	system(command);
+}
+
+void switchDesktop(int desktop) {
+	char command[35*sizeof(char)];
+	sprintf(command, "xdotool set_desktop %d", desktop);
+	system(command);
+}
+
+void grabFocus(Window win) {
+	char command[35*sizeof(char)];
+	sprintf(command, "xdotool windowfocus %ld", win);
+	system(command);
+}
 
 // Has the pointer moved into a different child window than the current selection
 // Probably a more efficient way to do this using x,y and math
@@ -227,7 +265,7 @@ MiniWindow* getWindowData(unsigned short maxWindows, int *nWindows) {
 		exit(1);
 	while (fgets(line, PARSE_MAX, fp) != NULL)
 	{
-		printf("%s", line);
+		//printf("%s", line);
 		char *curr;
 		int actuals[5]; // Parse values as they come in. Easier than storing then parsing
 		char *className = malloc(20 * sizeof(char));
@@ -362,7 +400,6 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid");
 	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands");
 	fonts[2] = initFont(dpy, screen, "Liberation Sans");
-
 	Visual* visual = DefaultVisual(dpy, screen);
 	Colormap colormap = DefaultColormap(dpy,screen);
 	XftColor* fontColor = malloc(sizeof(XftColor));
@@ -425,8 +462,9 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 
 // Handle a keypress in the workspace mode
 // returns whether or not we should exit afterwards
-int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
+int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx, Window wMain) {
 	
+	int oldSelected = model->selected;
 	if (sym == XK_Escape) {
 		return 1;
 	} else if (sym == XK_Right || sym == XK_l) {
@@ -446,6 +484,17 @@ int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 		return 1;
 	} else if (sym == XK_slash) {
 		model->mode = 1; // switch to search mode
+	}
+
+	// If using interactive selection navigation
+	if (oldSelected != model->selected) {
+		if (navType == NAV_MOVE_WITH_SELECTION) {
+			switchDesktop(model->selected);
+			grabFocus(wMain);
+		} else if (navType == NAV_MOVE_WITH_SELECTION_EXPERIMENTAL) {
+			setDesktopForWindow(wMain, model->selected);
+			activateWindow(wMain);
+		}
 	}
 
 	return 0;
@@ -506,6 +555,7 @@ int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 
 	return 0;
 }
+
 
 
 int main(int argc, char *argv[]) {
@@ -592,8 +642,11 @@ int main(int argc, char *argv[]) {
 		// Expose events
 		// Redraw fully only on the last damaged event
 		if (event.type == Expose && event.xexpose.count == 0) {
-			//printf("Expose event for %d\n", event.xexpose.window);
+			//printf("Expose event for %lx\n", event.xexpose.window);
 			redraw(dpy,screen,margin,colorsCtx,model);
+			if (event.xany.window == win) {
+				grabFocus(win);
+			}
 		}
 
 		// Key events
@@ -603,7 +656,7 @@ int main(int argc, char *argv[]) {
 			int shouldExit = 0;
 			switch(model->mode) {
 				case 0:
-					shouldExit = workspaceKey(sym, model, colorsCtx);
+					shouldExit = workspaceKey(sym, model, colorsCtx, win);
 					break;
 				case 1:
 					shouldExit = searchKey(sym, model, colorsCtx);
@@ -613,10 +666,12 @@ int main(int argc, char *argv[]) {
 					shouldExit = 1;
 					break;
 			}
-			if (shouldExit)
+			if (shouldExit == 1)
 				break; // goto cleanup
-			else
+			else {
 				redraw(dpy,screen,margin,colorsCtx,model);
+				grabFocus(win);
+			}
 		}
 		
 		// Mouse movement
@@ -626,6 +681,13 @@ int main(int argc, char *argv[]) {
 			if (pWorkspace != model->selected){
 				model->selected = pWorkspace;
 				redraw(dpy,screen,margin,colorsCtx,model);
+				if (navType == NAV_MOVE_WITH_SELECTION) {
+					switchDesktop(model->selected);
+					grabFocus(win);
+				} else if (navType == NAV_MOVE_WITH_SELECTION_EXPERIMENTAL) {
+					setDesktopForWindow(win, model->selected);
+					activateWindow(win);
+				}
 			}
 		}
 
@@ -645,6 +707,7 @@ int main(int argc, char *argv[]) {
 			// Always termiante even if we don't move
 			break;
 		}
+
 	}
 
 
