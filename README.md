@@ -1,42 +1,62 @@
-This is very much a POC for an XFCE-style window pager.  It's also my first C program so I don't know what I'm doing.  All the configuration is hardcoded right now, but it should be mostly obvious
+# XDPager
 
-Features
-- Shows a static view of the workspaces and windows on each when loaded
-- Clicking on a workspace or pressing Return to switch workspaces
+The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspace switcher of XFCE, without all the extra Desktop Environment (DE) dependencies. This is useful for those that prefer a non-DE setup like xmonad, i3, etc. but would still like an Exposé-lite feature.  XDPager assumes an EWMH compliant window manager. 
+
+## Features
+- Shows a dynamic view of workspaces and windows on each when loaded
+- Switches workspaces via XK_Return or mouse click
 - Search for and activate windows by their className
+- Unicode via Xft (e.g. for icon fonts)
 
-Configuration
-Config file loading is TBD; currently hardcoded configuration options
-The value set for `navType` changes the behavior of changing the workspace selection.
-| navType | Description |
-| `NAV_NORMAL_SELECTION` | Workspace won't change until Return is pressed |
-| `NAV_MOVE_WITH_SELECTION` | Workspace will change when the selection changes. Typically used if xdpager is set as a sticky window. Consult your WMfor limitations |
-| `NAV_MOVE_WITH_SELECTION_EXPERIMENTAL` | Workspace will change with the selection _and_ xdpager will move to that workspace. Visually distracting depending on compositor effects, time to unmap/map/redraw, etc. Not recommended for now. |
-
-Installation
-- Update the hardcoded path to window-data.sh in main.c to the absolute path on your system.  I'll fix this eventually
+## Installation
+- Clone the repository
 - Run `make`
-- Execute `xdpager` or hook it up to your window manager
+- Execute `xdpager` or hook it up to a keybinding
 
-Dependencies
-- X11 (obviously)
-- Xft and freetype2 (likely installed)
-- xdotool (commands to the window manager, window geometry querying)
-- xprop (get the list of virtual desktop names, get stacking list of window IDs)
-- bash, sed, awk, cut (string manipulation of xdotool and xprop)
+## Dependencies
+- libX11 (likely installed)
+- libXft and freetype2 (likely installed)
+- xdotool (commands to the window manager)
 
-Limitations
-- Loading data could technically be done in the C code, but I hate C strings and wanted to do as little string processing as possible.
-- The window set is statically loaded once.  This means no window moving/new windows/window closing will be tracked. 
+## Configuration
+Config file loading is TBD; options are currently hardcoded in `main.c`.  This means XDPager will need to be rebuilt in order to show changes.
+
+### navType
+Changes the behavior of moving the workspace selection.
+
+| navType | Description |
+| ------- | ----------- |
+| `NAV_NORMAL_SELECTION` | Workspace won't change until XK_Return is pressed or mouse click. |
+| `NAV_MOVE_WITH_SELECTION` | Workspace will change when the selection changes. Typically used if xdpager is set as a sticky window. Consult your WM for limitations on sticky windows. |
+| `NAV_MOVE_WITH_SELECTION_EXPERIMENTAL` | Workspace will change with the selection _and_ xdpager will move to that workspace. Visually distracting depending on compositor effects, time to unmap/map/redraw, etc. Not recommended for now. |
+ 
+>  TODO: add videos demonstrating these differences
+
+### nWorkspaces
+The number of workspaces to render.  XDPager will only display workspaces [0, nWorkspaces].  This will be irrelvant if dynamic workspaces are ever implemented.
+
+### workspacesPerRow
+The number of workspaces to show per row in the grid.  If workspacesPerRow == nWorkspaces, XDPager renders a single row.  If workspacesPerRow == 1, XDPager renders a single column.
+
+## searchPrefix
+The string prefix to indicates XDPager is in search mode.  This string supports UTF8.
+
+## colors
+Everything is hardcoded.  Knock yourself out.
+
+## Project Details
+The following sections contain details you probably don't care about
+### Limitations
 - Filtering limited to alphanumeric characters until I figure out how unicode keylogging works.
-- Number of desktops is statically defined.  Max number of windows is statically defined.
-  I don't have a dynamic array implementation and didn't want to get more frustrated with this language.
-- Currently relies on `_NET_CLIENT_LIST_STACKING` to determine which windows are above others. Pretty sure this is wrong
+- Number of desktops is statically defined.  Max number of windows is statically defined.  Dynamic desktop support should be possible with an extension watching the `_NET_NUM_DESKTOPS` atom on the root window.
+### The problem with `_NET_CLIENT_LIST_STACKING`
+ While XDPager relies on an EWMH compliant window manager, certain window managers (e.g. xmonad) don't fully comply with features they claim to support.  Ideally, XDPager could simply watch `_NET_CLIENT_LIST_STACKING` to determine which windows matter and which are above others.  However, when a window manager doesn't maintain correct stacking order in this list, there is no way to tell which windows should be drawn first without asking for the children of the root window.  Since the list of children has to be traversed anyway, XDPager just sources data from that.
 
-Compromises
-- Had to use Xft.h in order to support UTF8 strings for workspace names (glyph/icon fonts).
-  This means depending on both the xft libs and the freetype2 fonts.  You __probably__ have these installed anyway.
-- Some inefficient pieces of code where associate arrays or tries would come in handy.  I don't know how to do these in C.
+## FAQ
+> Why doesn't XDPager have live window content previews?  Gnome/Cinnamon/whoever has a real fullscreen exposé feature!
 
-Additional Notes
+XDPager is written with tiling window managers in mind (xmonad, i3, etc.) which treat non-visible windows differently than ``<your favorite DE>``. Typically, a window manager will unmap windows that aren't visible.  The window managers of popular DEs cheat this by leaving offscreen window mapped.  This project is not attempting to solve this limitation of the intended audience.
+
+## Disclaimer
+- This is my first C program so I don't know what I'm doing
 - The UTF8 decoding was copied from another repository (TODO: find that link...)
