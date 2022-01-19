@@ -2,11 +2,13 @@
 
 The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspace switcher of XFCE, without all the extra Desktop Environment (DE) dependencies. This is useful for those that prefer a non-DE setup like xmonad, i3, etc. but would still like an Exposé-lite feature.  XDPager assumes an EWMH compliant window manager. 
 
+![XDPager Overview](screenshot.png)
+
 ## Features
 - Shows a dynamic view of workspaces and windows on each when loaded
 - Switches workspaces via XK_Return or mouse click
 - Search for and activate windows by their className
-- Unicode via Xft (e.g. for icon fonts)
+- Draws UTF8 strings via Xft (e.g. for icon fonts)
 
 ## Installation
 - Clone the repository
