@@ -9,6 +9,7 @@
 #include <X11/Xft/Xft.h>
 #include <fontconfig/fontconfig.h>
 #include "utf8.h"
+#include "llist.c"
 
 #define NAV_NORMAL_SELECTION 0
 #define NAV_MOVE_WITH_SELECTION 1
@@ -54,8 +55,7 @@ typedef struct {
 } SearchContext;
 
 typedef struct {
-	MiniWindow* previews;
-	int nPreviews;
+	llist* previews;
 	Window* workspaces; // array of desktops
 	char** workspaceNames; // names of workspaces (assumes same size and order as workspaces)
 	XftDraw** draws;  // XFT draw surface for strings. size == nWorkspaces
@@ -104,18 +104,21 @@ int findPointerWorkspace(Window relative, Window workspaces[], unsigned int nWor
 	return -1;
 }
 
-void updateSearchContext(SearchContext* search, MiniWindow* previews, int nPreviews) {
+void updateSearchContext(SearchContext* search, llist* previews) {
 	MiniWindow* prevSelection = search->selectedWindow;
 
 	search->nMatched = 0;
 	char found = 0;
-	for(int i=0; i<nPreviews; ++i) {
-		if (strncmp(previews[i].className,search->buffer,search->size) == 0) {
-			search->matchedWindows[search->nMatched++] = &previews[i];
-			if (prevSelection == &previews[i]) {
+	node* ptr = previews->head;
+	for(int i=0; i<previews->size; ++i) {
+		MiniWindow* mw = ptr->data;
+		if (strncmp(mw->className,search->buffer,search->size) == 0) {
+			search->matchedWindows[search->nMatched++] = mw;
+			if (prevSelection == mw) {
 				found = True; // previous selection still matches, keep it selected
 			}
 		}
+		ptr = ptr->next;
 	}
 	// Use the first match in the list (should be deterministic) if we don't already have a selection
 	if (!found && search->nMatched > 0) {
@@ -155,8 +158,7 @@ void drawUtfText(Display* dpy, XftDraw* draw, XftFont** fonts, int nFonts, XftCo
 
 void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* m) {
 	unsigned short nWorkspaces = m->nWorkspaces;
-	MiniWindow* previews = m->previews;
-	int nPreviews = m->nPreviews;
+	llist* previews = m->previews;
 	SearchContext* search = m->search;
 	Window* workspaces = m->workspaces;
 	int selected = m->selected;
@@ -174,13 +176,14 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 	}
 
 	// Draw windows.  Note that order should be stacking order to ensure floating windows are drawn correctly
-	for(i=0; i<nPreviews; ++i) {
-		MiniWindow mw = previews[i];
+	node* ptr = previews->head;
+	for(i=0; i< previews->size; ++i) {
+		MiniWindow mw = *(MiniWindow *)ptr->data;
 		if (mw.workspace < nWorkspaces) {
 			GC fillGC = colorsCtx->normal;
 			GC outlineGC = colorsCtx->workspace;
 			if (m->mode == 1 && search->size > 0) {
-				if (&previews[i] == search->selectedWindow) {
+				if (ptr->data == search->selectedWindow) {
 					fillGC = colorsCtx->selected;
 					outlineGC = colorsCtx->matched;
 				} else if (strncmp(mw.className,search->buffer,search->size) == 0) {
@@ -197,6 +200,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 			XFillRectangle(dpy, workspaces[mw.workspace], fillGC, mw.x,mw.y,mw.w,mw.h);
 			XDrawRectangle(dpy, workspaces[mw.workspace], outlineGC, mw.x,mw.y,mw.w,mw.h);
 		}
+		ptr = ptr->next;
 	}
 
 	// Draw workspace labels
@@ -226,7 +230,7 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 		nRows += 1;
 	int height = (90+5) * nRows  + 10;
 	
-	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 20, width, height, 
+	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 100, width, height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
@@ -338,6 +342,177 @@ void reorderWindows(Display* dpy, MiniWindow* previews, int nPreviews) {
 	}
 }
 
+
+
+char* getStringProp(Display* dpy, Window w, Atom prop, Atom type) {
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, w, prop,
+			0,100,False,type,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		char* result = malloc(100*sizeof(char));
+		if (result == NULL)
+			puts("uh oh getStringProp");
+		strcpy(result,(char*)value);
+		free(value);
+		return result;
+	}
+	return NULL;
+}
+
+int getWmDesktop(Display* dpy, Window w) {
+	Atom prop = XInternAtom(dpy,"_NET_WM_DESKTOP",False);
+	Atom cardinal = XInternAtom(dpy,"CARDINAL",False);
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, w, prop,
+			0,100,False,cardinal,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		int result = *(int*)value;
+		free(value);
+		return result;
+	}
+	return -1;
+}
+
+Atom* getAtomProp(Display* dpy, Window w, Atom prop, int* return_nitems) {
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, w, prop,
+			0,100,False,AnyPropertyType,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		Atom* result = malloc(nitems*sizeof(Atom));
+		if (result == NULL)
+			puts("Uh oh getAtomProp");
+		memcpy(result,(Atom*)value, nitems*sizeof(Atom));
+		*return_nitems = nitems;
+		free(value);
+		return result;
+	}
+	return NULL;
+}
+
+char* getWmName(Display* dpy, Window w) {
+	Atom prop = XInternAtom(dpy,"_NET_WM_NAME",False);
+	Atom utf8String = XInternAtom(dpy,"UTF8_STRING",False);
+	return getStringProp(dpy, w, prop, utf8String);
+}
+
+char* getClassName(Display* dpy, Window w) {
+	Atom prop = XInternAtom(dpy,"WM_CLASS",False);
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, w, prop,
+			0,100,False,AnyPropertyType,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		char* result = NULL;
+		char* instance = (char*)value;
+		char* className = instance + strlen(instance) + 1;
+		if (className - instance < nitems)  {
+			// save one iteration by hardcoding a max size
+			result = malloc(30 * sizeof(char));
+			if (result == NULL)
+				puts("Uh oh getClassName");
+			strcpy(result,className);
+		}
+		free(value);
+		return result;
+	}
+	return NULL;
+}
+
+long getWmState(Display* dpy, Window w, int* return_nitems) {
+	Atom prop = XInternAtom(dpy,"WM_STATE",False);
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, w, prop,
+			0,100,False,AnyPropertyType,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		long result = *(long*)value;
+		*return_nitems = nitems;
+		free(value);
+		return result;
+	}
+	return 0;
+}
+
+MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height, 
+		char* className, Window window) {
+
+	// normalize coordinates TODO: dynamic
+	if (x >= 2560) 
+		x -= 2560;
+
+	// destructive but who cares
+	for(char* p=className; *p; p++) *p = tolower(*p);
+
+	// Scale factor is divisor
+	MiniWindow* mw = malloc(sizeof(MiniWindow));
+	if (mw == NULL)
+		puts("Uh oh makeMiniWindow");
+	mw->workspace = workspace;
+	mw->x = x / 16;
+	mw->y = y / 16;
+	mw->w = width / 16;
+	mw->h = height / 16;
+	mw->className = className;
+	mw->windowId = window;
+
+	return mw;
+}
+
+llist* testX(Display* dpy) {
+	Window root;
+	Window parent;
+	Window *children;
+	unsigned int nchildren;
+	XQueryTree(dpy, DefaultRootWindow(dpy), &root, &parent, &children, &nchildren);
+
+	llist* miniWindows = llist_create();
+	
+	for (int a=0; a < nchildren; a++) {
+		XWindowAttributes wattr;
+		XGetWindowAttributes(dpy,children[a],&wattr);
+
+		//char* name = getWmName(dpy,children[a]);
+		char* className = getClassName(dpy, children[a]);
+		int nitems = 0;
+		long state = getWmState(dpy,children[a],&nitems);
+		int desktop = getWmDesktop(dpy,children[a]);
+		if (state != 0 && desktop != -1) {
+//			printf("%d %d %d %d %d %s 0x%lx\n",desktop, 
+//				wattr.x, wattr.y, wattr.width, wattr.height, 
+//				className, children[a]);
+			MiniWindow* mw = makeMiniWindow(desktop,
+				wattr.x, wattr.y, wattr.width, wattr.height, 
+				className, children[a]);
+			llist_addBack(miniWindows,mw);
+		}
+	}
+
+	return miniWindows;
+}
+
 char** getWorkspaceNames(Display* dpy, int screen, int nWorkspaces) {
 	Atom prop = XInternAtom(dpy,"_NET_DESKTOP_NAMES",False);
 	Atom utf8String = XInternAtom(dpy,"UTF8_STRING",False);
@@ -352,6 +527,8 @@ char** getWorkspaceNames(Display* dpy, int screen, int nWorkspaces) {
 //	printf("s = %d Value = %s bytesAfter = %ld actualType = %ld format = %d nitems = %d\n", s, value, bytesAfter, actualType, format, nitems);
 	
 	char** names = malloc(nWorkspaces*sizeof(char**));
+	if(names == NULL)
+		puts("Uh oh getWorkspaceNames");
 	int start = 0;
 	int total = 0;
 	for(unsigned int i=0;i<nitems;i++) {
@@ -510,7 +687,7 @@ int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 			// If we have a search string, clear it instead of exiting
 			search->buffer[0] = '\0';
 			search->size = 0;
-			updateSearchContext(search, model->previews, model->nPreviews);
+			updateSearchContext(search, model->previews);
 		}
 		model->mode = 0; // switch back to workspace mode
 	} else if (sym == XK_Right) {
@@ -543,19 +720,27 @@ int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 		if (search->size < 20) {
 			strncat(search->buffer, XKeysymToString(sym), 1);
 			search->size++;
-			updateSearchContext(search, model->previews, model->nPreviews);
+			updateSearchContext(search, model->previews);
 		}
 	} else if(sym == XK_BackSpace) {
 		if (search->size > 0) {
 			search->buffer[search->size-1] = '\0';
 			search->size--;
-			updateSearchContext(search, model->previews, model->nPreviews);
+			updateSearchContext(search, model->previews);
 		}
 	}
 
 	return 0;
 }
 
+void cleanupList(llist* list) {
+	while (list->size > 0) {
+		MiniWindow* mw = llist_remove(list, 0);
+		free(mw->className);
+		free(mw);
+	}
+	free(list);
+}
 
 
 int main(int argc, char *argv[]) {
@@ -569,9 +754,9 @@ int main(int argc, char *argv[]) {
 	unsigned short nWorkspaces = 9;      // Number of workspaces/desktops
 	unsigned short workspacesPerRow = 3;
 	unsigned short maxWindows = 30;      // Maximum number of windows to preview (TODO: dynamic arrays)
-	int total = 0;                       // Total number of windows actually parsed
+	//int total = 0;                       // Total number of windows actually parsed
 	int margin = 1;                      // An amount to pad windows with for visual clarity (Might not be necessary anymore with border drawing)
-	char unreliableEwmhClientListStacking = 1;
+	//char unreliableEwmhClientListStacking = 1;
 	SearchContext* search = malloc(sizeof(SearchContext));
 	search->buffer = malloc(20 * sizeof(char)); // buffer for searching by text
 	search->selectedWindow = NULL;		// Give it a sensible default instead of random memory
@@ -586,8 +771,15 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
+
 	screen = DefaultScreen(dpy);
 	visual = DefaultVisual(dpy,screen);
+
+	// Set Root window to notify us of its child windows' events
+	XSetWindowAttributes attrs;
+	attrs.event_mask = SubstructureNotifyMask;
+	XChangeWindowAttributes(dpy,DefaultRootWindow(dpy),CWEventMask,&attrs);
+
 	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow);
 	
 	// TODO colors as configureable options.  Formatting
@@ -617,10 +809,11 @@ int main(int argc, char *argv[]) {
 
 	// Allocate an array of the actual windows to draw.
 	// Geometry for each set of windows should be relative to its display's origin
-	MiniWindow* miniWindows = getWindowData(maxWindows, &total);
-	
-	if (unreliableEwmhClientListStacking) 	
-		reorderWindows(dpy, miniWindows, total);
+//	MiniWindow* miniWindows = getWindowData(maxWindows, &total);
+	llist* miniWindows = testX(dpy);
+
+//	if (unreliableEwmhClientListStacking) 	
+//		reorderWindows(dpy, miniWindows, total);
 
 	// Collect all this shit together for organization
 	Model* model = malloc(sizeof(Model));
@@ -629,7 +822,6 @@ int main(int argc, char *argv[]) {
 	model->draws = draws;
 	model->nWorkspaces = nWorkspaces;
 	model->previews = miniWindows;
-	model->nPreviews = total;
 	model->selected = 0;
 	model->search = search;
 	model->mainWindow = workspaces[0];
@@ -638,6 +830,18 @@ int main(int argc, char *argv[]) {
 
 	while(1) {
 		XNextEvent(dpy, &event);
+
+		// Window resize events
+		if (event.type == ConfigureNotify) {
+//			printf("ConfigureNotify %lx %lx (%d,%d,%d,%d) %lx\n", 
+//					event.xconfigure.window, event.xconfigure.event,
+//					event.xconfigure.x, event.xconfigure.y, 
+//					event.xconfigure.width, event.xconfigure.height,
+//					event.xconfigure.above);
+			cleanupList(model->previews);
+			model->previews = testX(dpy);
+			redraw(dpy,screen,margin,colorsCtx,model);
+		}
 
 		// Expose events
 		// Redraw fully only on the last damaged event
@@ -721,7 +925,7 @@ int main(int argc, char *argv[]) {
 	free(colorsCtx->pixels);
 	free(colorsCtx);
 
-	free(model->previews);
+//	free(model->previews);
 	free(model->workspaces);
 	for(i=0;i<nWorkspaces;++i) {
 		free(model->workspaceNames[i]);
@@ -731,5 +935,6 @@ int main(int argc, char *argv[]) {
 	free(model->search);
 	free(model);
 
+	cleanupList(miniWindows);
 	return 0;
 }
