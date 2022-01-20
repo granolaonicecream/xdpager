@@ -31,12 +31,14 @@ typedef struct {
 	int w;
 	int h;
 	char* className;
+	char* name;
 	unsigned long windowId;
 } MiniWindow;
 
 typedef struct {
 	unsigned long* pixels;
 	XftFont** fonts; // Fonts in fallback order
+	XftFont** wFonts; // Fonts for optional window text
 	int nFonts;
 	XftColor* fontColor;
 	GC selected;
@@ -63,10 +65,30 @@ typedef struct {
 	int selected; // index of currently selected workspace
 	SearchContext* search; // the current search string
 	char mode; // current mode of the pager.  0 - workspace, 1 - className search, 2 - ???
+	char windowTextMode; // 0 - no text, 1 - className, 2 - name/title
 	
 	int workspacesPerRow;
 	Window mainWindow; // for drawing the search string
+	int previewWidth;  // Width of one mini window
+	int previewHeight; // Height of one mini window
 } Model;
+
+// TODO: how does control flow work here? Program keeps running 
+// but are things still being allocated?
+// Error handling for complex windows
+int errorHandler(Display* dpy, XErrorEvent* event) {
+	// Windows like firefox create and close windows 
+	// really quick on initial startup. These aren't 
+	// fatal errors for us, so we ignore them.
+	if (event->error_code == BadWindow) {
+		printf("BadWindow! \n");
+	} else {
+		// Still cleanup and exit if we hit something else
+		printf("Other error %d\n", event->error_code);
+		exit(1);
+	}
+	return 0;
+}
 
 // TODO: Move to a navigation file
 void setDesktopForWindow(Window win, int desktop) {
@@ -147,6 +169,9 @@ void drawUtfText(Display* dpy, XftDraw* draw, XftFont** fonts, int nFonts, XftCo
 		if (i != nFonts) {
 			XftTextExtentsUtf8(dpy,f,(XftChar8*)t, next - t, &ext);
 			tw += ext.xOff;
+			if (w >= 0 && tw >= w) {
+				break;
+			}
 			XftDrawStringUtf8(draw, color, f, x, y, (XftChar8*)t, next-t);
 			x += ext.xOff;
 		} else {
@@ -199,14 +224,31 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 			//printf("drawing rect %d (%d %d %d %d)\n",mw->workspace,mw->x,mw->y,mw->w,mw->h);
 			XFillRectangle(dpy, workspaces[mw.workspace], fillGC, mw.x,mw.y,mw.w,mw.h);
 			XDrawRectangle(dpy, workspaces[mw.workspace], outlineGC, mw.x,mw.y,mw.w,mw.h);
+
+			// draw title text
+			switch (m->windowTextMode) {
+				case 0: break; // No window text
+				case 1: 
+					if (mw.className)
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
+						colorsCtx->nFonts, colorsCtx->fontColor, 
+						mw.x, mw.y+10, mw.className, strlen(mw.className), mw.w);
+					break;
+				case 2:
+					if (mw.name)
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
+						colorsCtx->nFonts, colorsCtx->fontColor, 
+						mw.x, mw.y+10, mw.name, strlen(mw.name), mw.w);
+					break;
+			}
 		}
 		ptr = ptr->next;
 	}
 
 	// Draw workspace labels
 	for(i=0; i<nWorkspaces; ++i) {
-		drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, 80,
-				m->workspaceNames[i], strlen(m->workspaceNames[i]), 0);
+		drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->previewHeight-10,
+				m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
 	}
 
 	// TODO: customize where search string is drawn
@@ -217,20 +259,30 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 		strcpy(sstring, search->prefix);
 		strcat(sstring,search->buffer);
 		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 10,20,
-			sstring, search->size + prefixLen, 0);
+			sstring, search->size + prefixLen, -1);
 	}
 }
 
-Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow) {
+
+void setTitle(Display* dpy, Window w) {
+	char* title = "XDPager";
+	XChangeProperty(dpy, w, 
+			XInternAtom(dpy, "_NET_WM_NAME", False),
+			XInternAtom(dpy, "UTF8_STRING", False),
+			8, PropModeReplace, (unsigned char*)title, strlen(title));
+}
+
+Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow,
+		int* return_width, int* return_height) {
 	/// TODO: Dynamically determine dimensions by scale factor, number of workspaces, and their layout
 	// This code was written with 16:9 2560x1440 monitors
-	int width =  ((160+2+5) * workspacesPerRow) + 5;
+	*return_width =  ((160+2+5) * workspacesPerRow) + 5;
 	int nRows = nWorkspaces/workspacesPerRow;
 	if (nWorkspaces % workspacesPerRow != 0)
 		nRows += 1;
-	int height = (90+5) * nRows  + 10;
+	*return_height = (90+5) * nRows  + 10;
 	
-	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 100, width, height, 
+	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 100, *return_width, *return_height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
@@ -239,110 +291,13 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 	XSetClassHint(dpy, win, classHint);
 	XFree(classHint);
 
+	setTitle(dpy, win);
+
 	XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask);
 	XMapWindow(dpy, win);
 
 	return win;
 }
-
-// Get the data for the actual Window Previews
-// TODO: It would be really inefficient to run this after every window move/resize,
-// so would need to refactor this to run against an individual window ID
-MiniWindow* getWindowData(unsigned short maxWindows, int *nWindows) {
-	int PARSE_MAX = 100;
-	FILE *fp;
-	int status;
-	char line[LINE_MAX];
-	char delim[] = " \n";
-
-	MiniWindow *miniWindows = (MiniWindow*)malloc(maxWindows * sizeof(MiniWindow));
-	*nWindows = 0;
-
-	// TODO: this could all be done in C
-	// At least setup the script path to be relative to the installation directory
-	// Returns lines in the format:
-	// <desktop idx> <x> <y> <width> <height> <className> <windowID>
-	// the geometry is absolute positioning, so need to normalize for monitor resolutions
-	// TODO: apparently popen isn't standard. replace later
-	fp = (FILE*) popen("/home/archie/xdpager/window-data.sh", "r");
-	if (fp == NULL)
-		exit(1);
-	while (fgets(line, PARSE_MAX, fp) != NULL)
-	{
-		//printf("%s", line);
-		char *curr;
-		int actuals[5]; // Parse values as they come in. Easier than storing then parsing
-		char *className = malloc(20 * sizeof(char));
-		unsigned long windowId;
-		int i = 0;
-		curr = strtok(line, delim);
-		while (curr != NULL)
-		{
-			if (i < 5) {
-				actuals[i] = atoi(curr);
-			} else if (i == 5) {
-				strcpy(className, curr);
-				// lowercase normalize (can these contain unicode?)
-				for(char* p=className; *p; p++) *p = tolower(*p);
-			} else {
-				windowId = strtoul(curr, (char**)0, 16);
-			}
-			i++;
-			curr = strtok(NULL, delim);
-		}
-
-		// Normalize X position for multi-monitor setup
-		if (actuals[1] >= 2560) {
-			actuals[1] -= 2560;
-		}
-		// Linear transformation by scale factor
-		// TODO: configurable scale factor (keep in mind proportion to window size)
-		MiniWindow ptr;
-		ptr.workspace = actuals[0];
-		ptr.x = actuals[1] /16;
-		ptr.y = actuals[2] /16;
-		ptr.w = actuals[3] /16;
-		ptr.h = actuals[4] /16;
-		ptr.className = className;
-		ptr.windowId = windowId;
-		miniWindows[*nWindows] = ptr;
-
-		*nWindows += 1;
-	}
-
-	status = pclose(fp);
-	if (status == -1)
-		exit(1);
-
-	return miniWindows;
-}
-
-// Window Managers like XMonad implement _NET_CLIENT_LIST_STACKING but don't meet the spec
-// Need to resort to be able to draw floting windows reliably
-// Compare against the actual stacking order provided by the root window
-void reorderWindows(Display* dpy, MiniWindow* previews, int nPreviews) {
-	Window root;
-	Window parent;
-	Window *children;
-	unsigned int nchildren;
-	XQueryTree(dpy, DefaultRootWindow(dpy), &root, &parent, &children, &nchildren);
-	int sortIdx = 0;
-	for (int a=0; a < nchildren; a++) {
-		for (int x=0;x<nPreviews;x++) {
-			if (previews[x].windowId == children[a]) {
-				// printf("Found match, swapping %d and %d\n", x, sortIdx);
-				MiniWindow tmp = previews[x];
-				previews[x] = previews[sortIdx];
-				previews[sortIdx] = tmp;
-				sortIdx++;
-				break;
-			}
-		}
-
-	}
-}
-
-
 
 char* getStringProp(Display* dpy, Window w, Atom prop, Atom type) {
 	Atom actualType;
@@ -354,11 +309,11 @@ char* getStringProp(Display* dpy, Window w, Atom prop, Atom type) {
 			0,100,False,type,
 			&actualType,&format,&nitems,&bytesAfter, &value);
 	if (value) {
-		char* result = malloc(100*sizeof(char));
+		char* result = malloc(nitems*sizeof(char) + 1);
 		if (result == NULL)
 			puts("uh oh getStringProp");
 		strcpy(result,(char*)value);
-		free(value);
+		XFree(value);
 		return result;
 	}
 	return NULL;
@@ -377,7 +332,7 @@ int getWmDesktop(Display* dpy, Window w) {
 			&actualType,&format,&nitems,&bytesAfter, &value);
 	if (value) {
 		int result = *(int*)value;
-		free(value);
+		XFree(value);
 		return result;
 	}
 	return -1;
@@ -398,7 +353,8 @@ Atom* getAtomProp(Display* dpy, Window w, Atom prop, int* return_nitems) {
 			puts("Uh oh getAtomProp");
 		memcpy(result,(Atom*)value, nitems*sizeof(Atom));
 		*return_nitems = nitems;
-		free(value);
+		puts("free atom");
+		XFree(value);
 		return result;
 	}
 	return NULL;
@@ -431,7 +387,7 @@ char* getClassName(Display* dpy, Window w) {
 				puts("Uh oh getClassName");
 			strcpy(result,className);
 		}
-		free(value);
+		XFree(value);
 		return result;
 	}
 	return NULL;
@@ -450,14 +406,14 @@ long getWmState(Display* dpy, Window w, int* return_nitems) {
 	if (value) {
 		long result = *(long*)value;
 		*return_nitems = nitems;
-		free(value);
+		XFree(value);
 		return result;
 	}
 	return 0;
 }
 
 MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height, 
-		char* className, Window window) {
+		char* className, char* name, Window window, double s_x, double s_y) {
 
 	// normalize coordinates TODO: dynamic
 	if (x >= 2560) 
@@ -471,17 +427,18 @@ MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height,
 	if (mw == NULL)
 		puts("Uh oh makeMiniWindow");
 	mw->workspace = workspace;
-	mw->x = x / 16;
-	mw->y = y / 16;
-	mw->w = width / 16;
-	mw->h = height / 16;
+	mw->x = x / s_x;
+	mw->y = y / s_y;
+	mw->w = width / s_x;
+	mw->h = height / s_y;
 	mw->className = className;
+	mw->name = name;
 	mw->windowId = window;
 
 	return mw;
 }
 
-llist* testX(Display* dpy) {
+llist* testX(Display* dpy, double s_x, double s_y) {
 	Window root;
 	Window parent;
 	Window *children;
@@ -494,18 +451,19 @@ llist* testX(Display* dpy) {
 		XWindowAttributes wattr;
 		XGetWindowAttributes(dpy,children[a],&wattr);
 
-		//char* name = getWmName(dpy,children[a]);
+	//	printf("Start 0x%lx\n", children[a]);
+		char* name = getWmName(dpy,children[a]);
 		char* className = getClassName(dpy, children[a]);
 		int nitems = 0;
 		long state = getWmState(dpy,children[a],&nitems);
 		int desktop = getWmDesktop(dpy,children[a]);
 		if (state != 0 && desktop != -1) {
-//			printf("%d %d %d %d %d %s 0x%lx\n",desktop, 
-//				wattr.x, wattr.y, wattr.width, wattr.height, 
-//				className, children[a]);
+	//		printf("%d %d %d %d %d %s %s 0x%lx\n",desktop, 
+	//			wattr.x, wattr.y, wattr.width, wattr.height, 
+	//			className, name, children[a]);
 			MiniWindow* mw = makeMiniWindow(desktop,
 				wattr.x, wattr.y, wattr.width, wattr.height, 
-				className, children[a]);
+				className, name, children[a], s_x, s_y);
 			llist_addBack(miniWindows,mw);
 		}
 	}
@@ -577,6 +535,12 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid");
 	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands");
 	fonts[2] = initFont(dpy, screen, "Liberation Sans");
+
+	XftFont* windowFont = initFont(dpy, screen, "Liberation Sans:pixelsize=10");
+	XftFont** wFonts = malloc(nFonts * sizeof(XftFont*));
+	memcpy(wFonts,fonts,nFonts*sizeof(XftFont*));
+	wFonts[2] = windowFont;
+
 	Visual* visual = DefaultVisual(dpy, screen);
 	Colormap colormap = DefaultColormap(dpy,screen);
 	XftColor* fontColor = malloc(sizeof(XftColor));
@@ -588,6 +552,7 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	ctx->fonts = fonts;
 	ctx->nFonts = nFonts;
 	ctx->fontColor = fontColor;
+	ctx->wFonts = wFonts;
 
 	// Set the background color of the selected window to something different
 	XColor parsedColor;
@@ -661,6 +626,8 @@ int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx, Window wMain) 
 		return 1;
 	} else if (sym == XK_slash) {
 		model->mode = 1; // switch to search mode
+	} else if (sym == XK_F2) {
+		model->windowTextMode = (model->windowTextMode + 1) % 3;
 	}
 
 	// If using interactive selection navigation
@@ -736,14 +703,47 @@ int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 void cleanupList(llist* list) {
 	while (list->size > 0) {
 		MiniWindow* mw = llist_remove(list, 0);
-		free(mw->className);
+		if (mw->className)
+			free(mw->className);
+		if (mw->name)
+			free(mw->name);
 		free(mw);
 	}
 	free(list);
 }
 
+// If the main window has been resized, adjust the child windows aspect ratio,
+// no matter how dumb it looks
+void resizeWorkspaceWindows(Display* dpy, Window* workspaces, int nWorkspaces, int width, int height,
+		int workspacesPerRow, int* return_width, int* return_height) {
+
+	int margin = 1;
+	int nRows = nWorkspaces/workspacesPerRow;
+	if (nWorkspaces % workspacesPerRow != 0)
+		nRows += 1;
+	int windowWidth = (width+margin) / workspacesPerRow;
+	int windowHeight = (height+margin) / nRows;
+	for (int i=0; i<nWorkspaces; i++) {
+		int x = 5 + ((i%workspacesPerRow) * (windowWidth));
+		int y = 5 + ((i/workspacesPerRow) * (windowHeight)) ;
+		XMoveResizeWindow(dpy, workspaces[i], x, y, windowWidth, windowHeight);
+	}
+
+	*return_width = windowWidth;
+	*return_height = windowHeight;
+
+}
+
+char isWorkspaceWindow(Window* workspaces, int nWorkspaces, Window w) {
+	for (int i=0; i<nWorkspaces; i++) {
+		if (workspaces[i] == w)
+			return 1;
+	}
+	return 0;
+}
 
 int main(int argc, char *argv[]) {
+	XSetErrorHandler(errorHandler);
 	Display *dpy;
 	int screen;
 	Visual* visual;
@@ -780,7 +780,9 @@ int main(int argc, char *argv[]) {
 	attrs.event_mask = SubstructureNotifyMask;
 	XChangeWindowAttributes(dpy,DefaultRootWindow(dpy),CWEventMask,&attrs);
 
-	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow);
+	int width_old = 160;
+	int height_old = 90;
+	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, &width_old, &height_old);
 	
 	// TODO colors as configureable options.  Formatting
 	GfxContext* colorsCtx = initColors(dpy, screen, "rgb:4d/52/57", "rgb:1d/1f/21", "rgb:f2/e7/50");
@@ -791,6 +793,8 @@ int main(int argc, char *argv[]) {
 	Window* workspaces = malloc(nWorkspaces * sizeof(Window));
 	XftDraw** draws = malloc(nWorkspaces * sizeof(XftDraw*));
 	int i;
+	int width = 160 + margin;
+	int height = 90 + margin;
 	for (i=0;i<nWorkspaces;++i) {
 		int width = 160 + margin;
 		int height = 90 + margin;
@@ -809,11 +813,9 @@ int main(int argc, char *argv[]) {
 
 	// Allocate an array of the actual windows to draw.
 	// Geometry for each set of windows should be relative to its display's origin
-//	MiniWindow* miniWindows = getWindowData(maxWindows, &total);
-	llist* miniWindows = testX(dpy);
-
-//	if (unreliableEwmhClientListStacking) 	
-//		reorderWindows(dpy, miniWindows, total);
+	double s_x = 16;
+	double s_y = 16;
+	llist* miniWindows = testX(dpy, s_x, s_y);
 
 	// Collect all this shit together for organization
 	Model* model = malloc(sizeof(Model));
@@ -826,7 +828,14 @@ int main(int argc, char *argv[]) {
 	model->search = search;
 	model->mainWindow = workspaces[0];
 	model->mode = 0;
+	model->windowTextMode = 0;
 	model->workspacesPerRow = workspacesPerRow;
+	model->previewWidth = width;
+	model->previewHeight = height;
+
+	int nRows = nWorkspaces / workspacesPerRow;
+	if (nWorkspaces % workspacesPerRow != 0)
+		nRows++;
 
 	while(1) {
 		XNextEvent(dpy, &event);
@@ -838,8 +847,25 @@ int main(int argc, char *argv[]) {
 //					event.xconfigure.x, event.xconfigure.y, 
 //					event.xconfigure.width, event.xconfigure.height,
 //					event.xconfigure.above);
+//			TODO: Ignore events from our child windows as they don't require redraws
 			cleanupList(model->previews);
-			model->previews = testX(dpy);
+			if (event.xconfigure.window == win) {
+				// If our window has been resized, update the scale factors
+				int w = event.xconfigure.width;
+				int h = event.xconfigure.height; 
+				if (width_old != w || height_old != h) {
+					s_x = 2560.0 / (((double)w)/workspacesPerRow);
+					s_y = 1440.0 / (((double)h)/nRows);
+					width_old = w;
+					height_old = h;
+					resizeWorkspaceWindows(dpy, workspaces, nWorkspaces, w, h, workspacesPerRow, &width, &height);
+					model->previewWidth = width;
+					model->previewHeight = height;
+				}
+			} else if (isWorkspaceWindow(workspaces, nWorkspaces, event.xconfigure.window)) {
+				printf("notify on child window 0x%lx\n", event.xconfigure.window);
+			}
+			model->previews = testX(dpy, s_x, s_y);
 			redraw(dpy,screen,margin,colorsCtx,model);
 		}
 
