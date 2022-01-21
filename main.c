@@ -876,7 +876,7 @@ int main(int argc, char *argv[]) {
 		if (event.type == Expose && event.xexpose.count == 0) {
 			//printf("Expose event for %lx\n", event.xexpose.window);
 			redraw(dpy,screen,margin,colorsCtx,model);
-			if (event.xany.window == win) {
+			if (event.xany.window == win && navType == NAV_MOVE_WITH_SELECTION) {
 				grabFocus(win);
 			}
 		}
@@ -902,7 +902,9 @@ int main(int argc, char *argv[]) {
 				break; // goto cleanup
 			else {
 				redraw(dpy,screen,margin,colorsCtx,model);
-				grabFocus(win);
+				if (navType == NAV_MOVE_WITH_SELECTION) {
+					grabFocus(win);
+				}
 			}
 		}
 		
