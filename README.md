@@ -26,6 +26,8 @@ XDPager provides a live view of the windows on all desktops sans-window content.
 ## Desktop Mode
 In desktop mode, the cell background of the currently selected desktop is highlighted.  The user can change the selection by use of the arrow keys, vi-navigation, or using hovering with the mouse.  The return key or mouse click will navigate to the selected desktop.
 
+F2 can be used to toggle window text to none, className, and `_NET_WM_NAME`
+
 The escape key is used to close XDPager.
 
 ## Search Mode
