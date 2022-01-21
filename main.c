@@ -272,15 +272,16 @@ void setTitle(Display* dpy, Window w) {
 			8, PropModeReplace, (unsigned char*)title, strlen(title));
 }
 
+int MARGIN = 2;
 Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow,
 		int* return_width, int* return_height) {
 	/// TODO: Dynamically determine dimensions by scale factor, number of workspaces, and their layout
 	// This code was written with 16:9 2560x1440 monitors
-	*return_width =  ((160+2+5) * workspacesPerRow) + 5;
+	*return_width =  ((160 + MARGIN * 2) * workspacesPerRow);
 	int nRows = nWorkspaces/workspacesPerRow;
 	if (nWorkspaces % workspacesPerRow != 0)
 		nRows += 1;
-	*return_height = (90+5) * nRows  + 10;
+	*return_height = (90 + MARGIN * 2) * nRows;
 	
 	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 100, *return_width, *return_height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
@@ -717,15 +718,15 @@ void cleanupList(llist* list) {
 void resizeWorkspaceWindows(Display* dpy, Window* workspaces, int nWorkspaces, int width, int height,
 		int workspacesPerRow, int* return_width, int* return_height) {
 
-	int margin = 1;
 	int nRows = nWorkspaces/workspacesPerRow;
 	if (nWorkspaces % workspacesPerRow != 0)
 		nRows += 1;
-	int windowWidth = (width+margin) / workspacesPerRow;
-	int windowHeight = (height+margin) / nRows;
+	int windowWidth = (width + MARGIN*2) / workspacesPerRow;
+	int windowHeight = (height + MARGIN*2) / nRows;
 	for (int i=0; i<nWorkspaces; i++) {
-		int x = 5 + ((i%workspacesPerRow) * (windowWidth));
-		int y = 5 + ((i/workspacesPerRow) * (windowHeight)) ;
+		int x = ((i%workspacesPerRow) * (windowWidth + MARGIN));
+		int y = ((i/workspacesPerRow) * (windowHeight + MARGIN));
+		//printf("resize %d %d %d %d\n", x, y, windowWidth, windowHeight);
 		XMoveResizeWindow(dpy, workspaces[i], x, y, windowWidth, windowHeight);
 	}
 
@@ -793,13 +794,13 @@ int main(int argc, char *argv[]) {
 	Window* workspaces = malloc(nWorkspaces * sizeof(Window));
 	XftDraw** draws = malloc(nWorkspaces * sizeof(XftDraw*));
 	int i;
-	int width = 160 + margin;
-	int height = 90 + margin;
+	int width = 160;
+	int height = 90;
 	for (i=0;i<nWorkspaces;++i) {
-		int width = 160 + margin;
-		int height = 90 + margin;
-		int x = 5 + ((i%workspacesPerRow) * (width+5));
-		int y = 5 + ((i/workspacesPerRow) * (height+5)) ;
+		int width = 160;
+		int height = 90;
+		int x =  ((i%workspacesPerRow) * (width + MARGIN)) + MARGIN;
+		int y =  ((i/workspacesPerRow) * (height + MARGIN))+ MARGIN;
 		workspaces[i] = XCreateSimpleWindow(dpy, win, x, y, width, height, 1, BlackPixel(dpy, screen), WhitePixel(dpy, screen));
 		XSelectInput(dpy, workspaces[i], ExposureMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask);
 		XMapWindow(dpy, workspaces[i]);
@@ -856,6 +857,7 @@ int main(int argc, char *argv[]) {
 				if (width_old != w || height_old != h) {
 					s_x = 2560.0 / (((double)w)/workspacesPerRow);
 					s_y = 1440.0 / (((double)h)/nRows);
+					printf("resize main %d %d %d %d\n", w, h, width_old, height_old);
 					width_old = w;
 					height_old = h;
 					resizeWorkspaceWindows(dpy, workspaces, nWorkspaces, w, h, workspacesPerRow, &width, &height);
