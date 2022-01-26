@@ -57,6 +57,15 @@ typedef struct {
 } SearchContext;
 
 typedef struct {
+	int previewWidth;  // Dimensions of one mini window
+	int previewHeight; 
+	int width;	   // Dimensions of the main window
+	int height;	   
+	double s_x;	   // Scaling factors of previews
+	double s_y;	   
+} Sizing;
+
+typedef struct {
 	llist* previews;
 	Window* workspaces; // array of desktops
 	char** workspaceNames; // names of workspaces (assumes same size and order as workspaces)
@@ -69,8 +78,8 @@ typedef struct {
 	
 	int workspacesPerRow;
 	Window mainWindow; // for drawing the search string
-	int previewWidth;  // Width of one mini window
-	int previewHeight; // Height of one mini window
+	Sizing* sizing;    // Information about the current size and scaling
+	GfxContext* gfx;
 } Model;
 
 // TODO: how does control flow work here? Program keeps running 
@@ -200,6 +209,11 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 		XClearWindow(dpy,workspaces[i]);
 	}
 
+	// Window text offset based on pixelsize of fonts
+	int minDimension = m->sizing->previewHeight < m->sizing->previewWidth ? 
+		m->sizing->previewHeight : m->sizing->previewWidth;
+	int pixelsize = minDimension / 9;
+
 	// Draw windows.  Note that order should be stacking order to ensure floating windows are drawn correctly
 	node* ptr = previews->head;
 	for(i=0; i< previews->size; ++i) {
@@ -232,13 +246,13 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 					if (mw.className)
 					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
 						colorsCtx->nFonts, colorsCtx->fontColor, 
-						mw.x, mw.y+10, mw.className, strlen(mw.className), mw.w);
+						mw.x, mw.y+pixelsize, mw.className, strlen(mw.className), mw.w);
 					break;
 				case 2:
 					if (mw.name)
 					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
 						colorsCtx->nFonts, colorsCtx->fontColor, 
-						mw.x, mw.y+10, mw.name, strlen(mw.name), mw.w);
+						mw.x, mw.y+pixelsize, mw.name, strlen(mw.name), mw.w);
 					break;
 			}
 		}
@@ -247,7 +261,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 
 	// Draw workspace labels
 	for(i=0; i<nWorkspaces; ++i) {
-		drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->previewHeight-10,
+		drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
 				m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
 	}
 
@@ -258,7 +272,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 		char sstring[search->size+prefixLen];
 		strcpy(sstring, search->prefix);
 		strcat(sstring,search->buffer);
-		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 10,20,
+		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 10,20+pixelsize,
 			sstring, search->size + prefixLen, -1);
 	}
 }
@@ -513,14 +527,48 @@ char** getWorkspaceNames(Display* dpy, int screen, int nWorkspaces) {
 	return names;
 }
 
-XftFont* initFont(Display* dpy, int screen, char* fontName) {
+XftFont* initFont(Display* dpy, int screen, char* fontName, Sizing* sizing) {
 	// Load Font to use
-	XftFont* font = XftFontOpenName(dpy, screen, fontName);
+	int minDimension = sizing->previewHeight < sizing->previewWidth ? 
+		sizing->previewHeight : sizing->previewWidth;
+	int pixelsize = minDimension / 9;
+	char fontWithSize[100*sizeof(char)];
+	sprintf(fontWithSize, "%s:pixelsize=%d", fontName, pixelsize);
+	XftFont* font = XftFontOpenName(dpy, screen, fontWithSize);
 	if (!font) {
 		printf("failed to open font %s\n", fontName);
 		exit(1);
 	}
 	return font;
+}
+
+void reloadFonts(Model* model, Display* dpy, int screen) {
+	GfxContext* ctx = model->gfx;
+
+	// cleanup. No need to free since # of fonts doesn't change
+	if (ctx->fonts) {
+		for (int i=0; i<ctx->nFonts; i++) {
+			XftFontClose(dpy, ctx->fonts[i]);
+		}
+	}
+
+	Sizing* s = model->sizing;
+	// Load Fonts
+	// TODO: robustness, configurability, etc.
+	int nFonts = 3;
+	XftFont** fonts = malloc(nFonts * sizeof(XftFont*));
+	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid", s);
+	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands", s);
+	fonts[2] = initFont(dpy, screen, "Liberation Sans", s);
+
+	XftFont* windowFont = initFont(dpy, screen, "Liberation Sans", s);
+	XftFont** wFonts = malloc(nFonts * sizeof(XftFont*));
+	memcpy(wFonts,fonts,nFonts*sizeof(XftFont*));
+	wFonts[2] = windowFont;
+
+	ctx->fonts = fonts;
+	ctx->nFonts = nFonts;
+	ctx->wFonts = wFonts;
 }
 
 // Initializes everything we need for drawing to a Window/XftDraw
@@ -529,19 +577,6 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	GfxContext* ctx = malloc(sizeof(GfxContext));
 	ctx->pixels = malloc(3* sizeof(unsigned long));
 
-	// Load Fonts
-	// TODO: robustness, configurability, etc.
-	int nFonts = 3;
-	XftFont** fonts = malloc(nFonts * sizeof(XftFont*));
-	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid");
-	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands");
-	fonts[2] = initFont(dpy, screen, "Liberation Sans");
-
-	XftFont* windowFont = initFont(dpy, screen, "Liberation Sans:pixelsize=10");
-	XftFont** wFonts = malloc(nFonts * sizeof(XftFont*));
-	memcpy(wFonts,fonts,nFonts*sizeof(XftFont*));
-	wFonts[2] = windowFont;
-
 	Visual* visual = DefaultVisual(dpy, screen);
 	Colormap colormap = DefaultColormap(dpy,screen);
 	XftColor* fontColor = malloc(sizeof(XftColor));
@@ -549,11 +584,7 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 		printf("Failed to allocate xft color %s\n", selectedFg);
 		exit(1);
 	}
-
-	ctx->fonts = fonts;
-	ctx->nFonts = nFonts;
 	ctx->fontColor = fontColor;
-	ctx->wFonts = wFonts;
 
 	// Set the background color of the selected window to something different
 	XColor parsedColor;
@@ -603,10 +634,67 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	return ctx;
 }
 
+void cleanupList(llist* list) {
+	while (list->size > 0) {
+		MiniWindow* mw = llist_remove(list, 0);
+		if (mw->className)
+			free(mw->className);
+		if (mw->name)
+			free(mw->name);
+		free(mw);
+	}
+	free(list);
+}
+
+
+void setPreviewScaling(Model* model) {
+
+	int nRows = model->nWorkspaces / model->workspacesPerRow;
+	if (model->nWorkspaces % model->workspacesPerRow != 0)
+		nRows++;
+	Sizing* s = model->sizing;
+	s->s_x = 2560.0 / (((double)s->width)/model->workspacesPerRow);
+	s->s_y = 1440.0 / (((double)s->height)/nRows);
+}
+
+// If the main window has been resized, adjust the child windows aspect ratio,
+// no matter how dumb it looks
+void resizeWorkspaceWindows(Display* dpy, Model* m) {
+
+	Sizing* s = m->sizing;
+	Window* workspaces = m->workspaces;
+	int nWorkspaces = m->nWorkspaces;
+	int workspacesPerRow = m->workspacesPerRow;
+	
+	int nRows = nWorkspaces/workspacesPerRow;
+	if (nWorkspaces % workspacesPerRow != 0)
+		nRows += 1;
+	int windowWidth = (s->width + MARGIN*2) / workspacesPerRow;
+	int windowHeight = (s->height + MARGIN*2) / nRows;
+	for (int i=0; i<nWorkspaces; i++) {
+		int x = ((i%workspacesPerRow) * (windowWidth + MARGIN));
+		int y = ((i/workspacesPerRow) * (windowHeight + MARGIN));
+		//printf("resize %d %d %d %d\n", x, y, windowWidth, windowHeight);
+		XMoveResizeWindow(dpy, workspaces[i], x, y, windowWidth, windowHeight);
+	}
+
+	s->previewWidth = windowWidth;
+	s->previewHeight = windowHeight;
+}
+
+void handleResize(Display* dpy, int screen, Model* model) {
+	setPreviewScaling(model);
+	resizeWorkspaceWindows(dpy, model);
+	cleanupList(model->previews);
+	model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
+	reloadFonts(model, dpy, screen);
+//	printf("w,h %d,%d\n", model->sizing->width, model->sizing->height);
+}
+
 // Handle a keypress in the workspace mode
 // returns whether or not we should exit afterwards
-int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx, Window wMain) {
-	
+int workspaceKey(KeySym sym, Model* model, Display* dpy, int screen, Window wMain) {
+
 	int oldSelected = model->selected;
 	if (sym == XK_Escape) {
 		return 1;
@@ -629,6 +717,16 @@ int workspaceKey(KeySym sym, Model* model, GfxContext* colorsCtx, Window wMain) 
 		model->mode = 1; // switch to search mode
 	} else if (sym == XK_F2) {
 		model->windowTextMode = (model->windowTextMode + 1) % 3;
+	} else if (sym == XK_F3) {
+		if (model->workspacesPerRow < model->nWorkspaces) {
+			model->workspacesPerRow++;
+			handleResize(dpy, screen, model);
+		}
+	} else if (sym == XK_F4) {
+		if (model->workspacesPerRow > 1) {
+			model->workspacesPerRow--;
+			handleResize(dpy, screen, model);
+		}
 	}
 
 	// If using interactive selection navigation
@@ -701,39 +799,6 @@ int searchKey(KeySym sym, Model* model, GfxContext* colorsCtx) {
 	return 0;
 }
 
-void cleanupList(llist* list) {
-	while (list->size > 0) {
-		MiniWindow* mw = llist_remove(list, 0);
-		if (mw->className)
-			free(mw->className);
-		if (mw->name)
-			free(mw->name);
-		free(mw);
-	}
-	free(list);
-}
-
-// If the main window has been resized, adjust the child windows aspect ratio,
-// no matter how dumb it looks
-void resizeWorkspaceWindows(Display* dpy, Window* workspaces, int nWorkspaces, int width, int height,
-		int workspacesPerRow, int* return_width, int* return_height) {
-
-	int nRows = nWorkspaces/workspacesPerRow;
-	if (nWorkspaces % workspacesPerRow != 0)
-		nRows += 1;
-	int windowWidth = (width + MARGIN*2) / workspacesPerRow;
-	int windowHeight = (height + MARGIN*2) / nRows;
-	for (int i=0; i<nWorkspaces; i++) {
-		int x = ((i%workspacesPerRow) * (windowWidth + MARGIN));
-		int y = ((i/workspacesPerRow) * (windowHeight + MARGIN));
-		//printf("resize %d %d %d %d\n", x, y, windowWidth, windowHeight);
-		XMoveResizeWindow(dpy, workspaces[i], x, y, windowWidth, windowHeight);
-	}
-
-	*return_width = windowWidth;
-	*return_height = windowHeight;
-
-}
 
 char isWorkspaceWindow(Window* workspaces, int nWorkspaces, Window w) {
 	for (int i=0; i<nWorkspaces; i++) {
@@ -753,7 +818,7 @@ int main(int argc, char *argv[]) {
 
 	// Config options
 	unsigned short nWorkspaces = 9;      // Number of workspaces/desktops
-	unsigned short workspacesPerRow = 3;
+	unsigned short workspacesPerRow =9;
 	unsigned short maxWindows = 30;      // Maximum number of windows to preview (TODO: dynamic arrays)
 	//int total = 0;                       // Total number of windows actually parsed
 	int margin = 1;                      // An amount to pad windows with for visual clarity (Might not be necessary anymore with border drawing)
@@ -818,6 +883,15 @@ int main(int argc, char *argv[]) {
 	double s_y = 16;
 	llist* miniWindows = testX(dpy, s_x, s_y);
 
+	// Size/scale info
+	Sizing* s = malloc(sizeof(Sizing));
+	s->width = width_old;
+	s->height = height_old;
+	s->s_x = s_x;
+	s->s_y = s_y;
+	s->previewWidth = width;
+	s->previewHeight = height;	
+
 	// Collect all this shit together for organization
 	Model* model = malloc(sizeof(Model));
 	model->workspaces = workspaces;
@@ -831,12 +905,10 @@ int main(int argc, char *argv[]) {
 	model->mode = 0;
 	model->windowTextMode = 0;
 	model->workspacesPerRow = workspacesPerRow;
-	model->previewWidth = width;
-	model->previewHeight = height;
+	model->sizing = s;
+	model->gfx = colorsCtx;
 
-	int nRows = nWorkspaces / workspacesPerRow;
-	if (nWorkspaces % workspacesPerRow != 0)
-		nRows++;
+	reloadFonts(model, dpy, screen);
 
 	while(1) {
 		XNextEvent(dpy, &event);
@@ -849,25 +921,23 @@ int main(int argc, char *argv[]) {
 //					event.xconfigure.width, event.xconfigure.height,
 //					event.xconfigure.above);
 //			TODO: Ignore events from our child windows as they don't require redraws
-			cleanupList(model->previews);
 			if (event.xconfigure.window == win) {
 				// If our window has been resized, update the scale factors
 				int w = event.xconfigure.width;
 				int h = event.xconfigure.height; 
-				if (width_old != w || height_old != h) {
-					s_x = 2560.0 / (((double)w)/workspacesPerRow);
-					s_y = 1440.0 / (((double)h)/nRows);
-					printf("resize main %d %d %d %d\n", w, h, width_old, height_old);
-					width_old = w;
-					height_old = h;
-					resizeWorkspaceWindows(dpy, workspaces, nWorkspaces, w, h, workspacesPerRow, &width, &height);
-					model->previewWidth = width;
-					model->previewHeight = height;
+				if (model->sizing->width != w || model->sizing->height != h) {
+					model->sizing->width = w;
+					model->sizing->height = h;
+					handleResize(dpy, screen, model);
 				}
 			} else if (isWorkspaceWindow(workspaces, nWorkspaces, event.xconfigure.window)) {
 				printf("notify on child window 0x%lx\n", event.xconfigure.window);
+			} else {
+				// Some other window has changed size
+				// Don't need to update our layout or scaling, just the list of previews
+				cleanupList(model->previews);
+				model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
 			}
-			model->previews = testX(dpy, s_x, s_y);
 			redraw(dpy,screen,margin,colorsCtx,model);
 		}
 
@@ -888,7 +958,7 @@ int main(int argc, char *argv[]) {
 			int shouldExit = 0;
 			switch(model->mode) {
 				case 0:
-					shouldExit = workspaceKey(sym, model, colorsCtx, win);
+					shouldExit = workspaceKey(sym, model, dpy, screen, win);
 					break;
 				case 1:
 					shouldExit = searchKey(sym, model, colorsCtx);
