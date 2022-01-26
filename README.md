@@ -5,10 +5,12 @@ The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspa
 ![XDPager Overview](screenshot.png)
 
 ## Features
-- Shows a dynamic view of workspaces and windows on each when loaded
-- Switches workspaces via XK_Return or mouse click
+- Shows a dynamic view of desktops and windows on each when loaded
+- Switch desktops
 - Search for and activate windows by their className
 - Draws UTF8 strings via Xft (e.g. for icon fonts)
+- Dynamic font resizing
+- Customizable number of grid rows, make a pager as horizontal or vertical as you want it to be
 
 ## Installation
 - Clone the repository
@@ -24,19 +26,28 @@ The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspa
 XDPager provides a live view of the windows on all desktops sans-window content.  Each desktop is drawn to a grid cell and labeled with its respective desktop name in the bottom left corner.  XDPager has two operating modes: desktop and search.
 
 ## Desktop Mode
-In desktop mode, the cell background of the currently selected desktop is highlighted.  The user can change the selection by use of the arrow keys, vi-navigation, or using hovering with the mouse.  The return key or mouse click will navigate to the selected desktop.
+In desktop mode, the cell background of the currently selected desktop is highlighted.  The user can select a desktop and issue a switch desktop command to the window manager.
 
-F2 can be used to toggle window text to none, className, and `_NET_WM_NAME`
-
-The escape key is used to close XDPager.
+| Key | Description |
+| --- | ----------- |
+| Arrow keys, hjkl, mouse pointer | selection navigation |
+| Return, mouse click | switch to selected desktop |
+| / | switch to Search mode |
+| F2 | toggle text on windows between none, className, and `_NET_WM_NAME` |
+| F3 | increase the number of desktops per row |
+| F4 | decrease the number of desktops per row |
+| Escape | exit XDPager | 
 
 ## Search Mode
 To enter search mode, press the forward slash key while in desktop mode.  The `stringPrefix` is display in the upper left corner of XDPager to signify this mode is active.
 
 In search mode, the user can enter a text query that is equivalent to ``window.className.startsWith(query)``.  Windows that match this predicate are outlined and the current window selection is additionally filled with color.  The left/right arrow keys allow the user to rotate the selected window to the previous/next of the outlined windows.  Pressing return will activate the window, which may include switching desktops.
 
-The escape key is used to exit search mode.
-
+| Key | Description |
+| --- | ----------- |
+| Left, Right | rotate selection of matched windows |
+| Return | activate the selected window, including possibly switching desktops |
+| Escape | return to Desktop mode |
 
 # Configuration
 Config file loading is TBD; options are currently hardcoded in `main.c`.  This means XDPager will need to be rebuilt in order to show changes.
@@ -58,10 +69,10 @@ The number of workspaces to render.  XDPager will only display workspaces [0, nW
 ### workspacesPerRow
 The number of workspaces to show per row in the grid.  If workspacesPerRow == nWorkspaces, XDPager renders a single row.  If workspacesPerRow == 1, XDPager renders a single column.
 
-## searchPrefix
+### searchPrefix
 The string prefix to indicates XDPager is in search mode.  This string supports UTF8.
 
-## colors
+### colors
 Everything is hardcoded.  Knock yourself out.
 
 # Project Details
@@ -69,7 +80,7 @@ The following sections contain details you probably don't care about
 ### Limitations
 - Filtering limited to alphanumeric characters until I figure out how unicode keylogging works.
 - Number of desktops is statically defined.  Max number of windows is statically defined.  Dynamic desktop support should be possible with an extension watching the `_NET_NUM_DESKTOPS` atom on the root window.
-- Assumptions about monitors, X screen setup, and resolution are currently hardcoded to my setup (2x 2560x1440 monitors in a horizontal layout). Dynamic discovery and layout is on the backlog.
+- Assumptions about monitors, X screen setup, and resolution are currently hardcoded to my setup (2x 2560x1440 monitors in a horizontal layout). Dynamic discovery and layout is on the backlog. Modify the scaling factor calculation for your resolution.
 ### The problem with `_NET_CLIENT_LIST_STACKING`
  While XDPager relies on an EWMH compliant window manager, certain window managers (e.g. xmonad) don't fully comply with features they claim to support.  Ideally, XDPager could simply watch `_NET_CLIENT_LIST_STACKING` to determine which windows matter and which are above others.  However, when a window manager doesn't maintain correct stacking order in this list, there is no way to tell which windows should be drawn first without asking for the children of the root window.  Since the list of children has to be traversed anyway, XDPager just sources data from that.
 
