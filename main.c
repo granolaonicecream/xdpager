@@ -646,15 +646,15 @@ void cleanupList(llist* list) {
 	free(list);
 }
 
-
+// assumes preview window dimensions already set
 void setPreviewScaling(Model* model) {
-
 	int nRows = model->nWorkspaces / model->workspacesPerRow;
 	if (model->nWorkspaces % model->workspacesPerRow != 0)
 		nRows++;
 	Sizing* s = model->sizing;
-	s->s_x = 2560.0 / (((double)s->width)/model->workspacesPerRow);
-	s->s_y = 1440.0 / (((double)s->height)/nRows);
+	s->s_x = 2560.0 /  s->previewWidth;
+	s->s_y = 1440.0 / s->previewHeight;
+	// printf("s_x s_y %f %f\n", s->s_x, s->s_y);
 }
 
 // If the main window has been resized, adjust the child windows aspect ratio,
@@ -669,12 +669,14 @@ void resizeWorkspaceWindows(Display* dpy, Model* m) {
 	int nRows = nWorkspaces/workspacesPerRow;
 	if (nWorkspaces % workspacesPerRow != 0)
 		nRows += 1;
-	int windowWidth = (s->width + MARGIN*2) / workspacesPerRow;
-	int windowHeight = (s->height + MARGIN*2) / nRows;
+	int windowWidth = ((s->width - MARGIN) / workspacesPerRow ) - MARGIN;
+	int windowHeight = ((s->height - MARGIN) / nRows) - MARGIN;
 	for (int i=0; i<nWorkspaces; i++) {
-		int x = ((i%workspacesPerRow) * (windowWidth + MARGIN));
-		int y = ((i/workspacesPerRow) * (windowHeight + MARGIN));
-		//printf("resize %d %d %d %d\n", x, y, windowWidth, windowHeight);
+		int xoff = i%workspacesPerRow;
+		int yoff = i/workspacesPerRow;
+		int x = (xoff * windowWidth) + ( (xoff+ 1) * MARGIN );
+		int y = (yoff * windowHeight) + ( (yoff+1) * MARGIN);
+		// printf("resize %d %d %d %d %d %d\n", x, y, windowWidth, windowHeight, s->width, s->height);
 		XMoveResizeWindow(dpy, workspaces[i], x, y, windowWidth, windowHeight);
 	}
 
@@ -683,8 +685,8 @@ void resizeWorkspaceWindows(Display* dpy, Model* m) {
 }
 
 void handleResize(Display* dpy, int screen, Model* model) {
-	setPreviewScaling(model);
 	resizeWorkspaceWindows(dpy, model);
+	setPreviewScaling(model);
 	cleanupList(model->previews);
 	model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
 	reloadFonts(model, dpy, screen);
