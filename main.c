@@ -155,6 +155,9 @@ void updateSearchContext(SearchContext* search, llist* previews) {
 	if (!found && search->nMatched > 0) {
 		search->selectedWindow = search->matchedWindows[0];
 	}
+	if (search->nMatched == 0) {
+		search->selectedWindow = NULL;
+	}
 }
 
 void drawUtfText(Display* dpy, XftDraw* draw, XftFont** fonts, int nFonts, XftColor* color, int x, int y,
@@ -822,9 +825,7 @@ int main(int argc, char *argv[]) {
 	unsigned short nWorkspaces = 9;      // Number of workspaces/desktops
 	unsigned short workspacesPerRow =9;
 	unsigned short maxWindows = 30;      // Maximum number of windows to preview (TODO: dynamic arrays)
-	//int total = 0;                       // Total number of windows actually parsed
-	int margin = 1;                      // An amount to pad windows with for visual clarity (Might not be necessary anymore with border drawing)
-	//char unreliableEwmhClientListStacking = 1;
+
 	SearchContext* search = malloc(sizeof(SearchContext));
 	search->buffer = malloc(20 * sizeof(char)); // buffer for searching by text
 	search->selectedWindow = NULL;		// Give it a sensible default instead of random memory
@@ -940,14 +941,14 @@ int main(int argc, char *argv[]) {
 				cleanupList(model->previews);
 				model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
 			}
-			redraw(dpy,screen,margin,colorsCtx,model);
+			redraw(dpy,screen,MARGIN,colorsCtx,model);
 		}
 
 		// Expose events
 		// Redraw fully only on the last damaged event
 		if (event.type == Expose && event.xexpose.count == 0) {
 			//printf("Expose event for %lx\n", event.xexpose.window);
-			redraw(dpy,screen,margin,colorsCtx,model);
+			redraw(dpy,screen,MARGIN,colorsCtx,model);
 			if (event.xany.window == win && navType == NAV_MOVE_WITH_SELECTION) {
 				grabFocus(win);
 			}
@@ -973,7 +974,7 @@ int main(int argc, char *argv[]) {
 			if (shouldExit == 1)
 				break; // goto cleanup
 			else {
-				redraw(dpy,screen,margin,colorsCtx,model);
+				redraw(dpy,screen,MARGIN,colorsCtx,model);
 				if (navType == NAV_MOVE_WITH_SELECTION) {
 					grabFocus(win);
 				}
@@ -986,7 +987,7 @@ int main(int argc, char *argv[]) {
 			int pWorkspace = findPointerWorkspace(event.xmotion.window, workspaces, nWorkspaces);
 			if (pWorkspace != model->selected){
 				model->selected = pWorkspace;
-				redraw(dpy,screen,margin,colorsCtx,model);
+				redraw(dpy,screen,MARGIN,colorsCtx,model);
 				if (navType == NAV_MOVE_WITH_SELECTION) {
 					switchDesktop(model->selected);
 					grabFocus(win);
