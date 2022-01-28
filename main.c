@@ -932,6 +932,9 @@ int main(int argc, char *argv[]) {
 					model->sizing->width = w;
 					model->sizing->height = h;
 					handleResize(dpy, screen, model);
+				} else {
+					cleanupList(model->previews);
+					model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
 				}
 			} else if (isWorkspaceWindow(workspaces, nWorkspaces, event.xconfigure.window)) {
 				printf("notify on child window 0x%lx\n", event.xconfigure.window);
