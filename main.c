@@ -15,7 +15,7 @@
 #define NAV_MOVE_WITH_SELECTION 1
 #define NAV_MOVE_WITH_SELECTION_EXPERIMENTAL 2
 
-char navType = NAV_NORMAL_SELECTION;
+char navType = NAV_MOVE_WITH_SELECTION;
 
 typedef struct {
 	unsigned short nWorkspaces;      // Number of workspaces/desktops
@@ -289,6 +289,41 @@ void setTitle(Display* dpy, Window w) {
 			8, PropModeReplace, (unsigned char*)title, strlen(title));
 }
 
+void setDock(Display* dpy, Window w) {
+	
+	Atom cardinal = XInternAtom(dpy,"CARDINAL",False);
+	unsigned long allDesktops = 0xFFFFFFFF;
+	XChangeProperty(dpy, w,
+			XInternAtom(dpy, "_NET_WM_DESKTOP", False),
+			cardinal,
+			32, PropModeReplace, (unsigned char*)&allDesktops, 1);
+
+
+	Atom dock = XInternAtom(dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+	XChangeProperty(dpy, w,
+			XInternAtom(dpy, "_NET_WM_WINDOW_TYPE", False),
+			XInternAtom(dpy, "ATOM", False),
+			32, PropModeReplace,
+			(unsigned char*)&dock, 1);
+
+	// TODO: configurable dock placement
+	long insets[12] = {0};
+	insets[3] = 100;
+	insets[10] = 0;
+	insets[11] = 2559;
+	XChangeProperty(dpy, w,
+			XInternAtom(dpy, "_NET_WM_STRUT", False),
+			cardinal,
+			32, PropModeReplace, (unsigned char*)insets, 4);
+
+	XChangeProperty(dpy, w,
+			XInternAtom(dpy, "_NET_WM_STRUT_PARTIAL", False),
+			cardinal,
+			32, PropModeReplace, (unsigned char*)insets, 12);
+
+
+}
+
 int MARGIN = 2;
 Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow,
 		int* return_width, int* return_height) {
@@ -299,8 +334,11 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 	if (nWorkspaces % workspacesPerRow != 0)
 		nRows += 1;
 	*return_height = (90 + MARGIN * 2) * nRows;
+
+	*return_width = 2560;
+	*return_height = 100;
 	
-	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 20, 100, *return_width, *return_height, 
+	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 1440 - *return_height, *return_width, *return_height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
@@ -310,11 +348,31 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 	XFree(classHint);
 
 	setTitle(dpy, win);
+	setDock(dpy, win);
 
 	XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask);
 	XMapWindow(dpy, win);
 
 	return win;
+}
+
+int getCurrentDesktop(Display* dpy) {
+	Atom prop = XInternAtom(dpy,"_NET_CURRENT_DESKTOP",False);
+	Atom cardinal = XInternAtom(dpy,"CARDINAL",False);
+	Atom actualType;
+	int format;
+	unsigned long nitems;
+	unsigned long bytesAfter;
+	unsigned char* value;
+	XGetWindowProperty(dpy, DefaultRootWindow(dpy), prop,
+			0,100,False,cardinal,
+			&actualType,&format,&nitems,&bytesAfter, &value);
+	if (value) {
+		int result = *(int*)value;
+		XFree(value);
+		return result;
+	}
+	return -1;
 }
 
 char* getStringProp(Display* dpy, Window w, Atom prop, Atom type) {
@@ -849,6 +907,10 @@ int main(int argc, char *argv[]) {
 	attrs.event_mask = SubstructureNotifyMask;
 	XChangeWindowAttributes(dpy,DefaultRootWindow(dpy),CWEventMask,&attrs);
 
+	// Get the desktop we're currently on
+	// TODO: Xinerama to determine where we actually are
+	int currentDesktop = getCurrentDesktop(dpy);
+
 	int width_old = 160;
 	int height_old = 90;
 	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, &width_old, &height_old);
@@ -902,7 +964,7 @@ int main(int argc, char *argv[]) {
 	model->draws = draws;
 	model->nWorkspaces = nWorkspaces;
 	model->previews = miniWindows;
-	model->selected = 0;
+	model->selected = currentDesktop;
 	model->search = search;
 	model->mainWindow = workspaces[0];
 	model->mode = 0;
@@ -912,6 +974,7 @@ int main(int argc, char *argv[]) {
 	model->gfx = colorsCtx;
 
 	reloadFonts(model, dpy, screen);
+	handleResize(dpy, screen, model);
 
 	while(1) {
 		XNextEvent(dpy, &event);
