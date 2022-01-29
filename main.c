@@ -10,19 +10,13 @@
 #include <fontconfig/fontconfig.h>
 #include "utf8.h"
 #include "llist.c"
+#include "config.c"
 
-#define NAV_NORMAL_SELECTION 0
-#define NAV_MOVE_WITH_SELECTION 1
-#define NAV_MOVE_WITH_SELECTION_EXPERIMENTAL 2
+#define NAV_NORMAL_SELECTION 1
+#define NAV_MOVE_WITH_SELECTION 2
+#define NAV_MOVE_WITH_SELECTION_EXPERIMENTAL 3
 
-char navType = NAV_MOVE_WITH_SELECTION;
-
-typedef struct {
-	unsigned short nWorkspaces;      // Number of workspaces/desktops
-	unsigned short workspacesPerRow; // Number of workspaces to show per row
-	unsigned short maxWindows;      // Maximum number of windows to preview (TODO: dynamic arrays)
-	char* searchPrefix; // Prefix to show while in search mode
-} XDConfig;
+char navType = NAV_NORMAL_SELECTION;
 
 typedef struct {
 	int workspace;
@@ -326,7 +320,7 @@ void setDock(Display* dpy, Window w) {
 
 int MARGIN = 2;
 Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow,
-		int* return_width, int* return_height) {
+		int* return_width, int* return_height, XDConfig* cfg) {
 	/// TODO: Dynamically determine dimensions by scale factor, number of workspaces, and their layout
 	// This code was written with 16:9 2560x1440 monitors
 	*return_width =  ((160 + MARGIN * 2) * workspacesPerRow);
@@ -348,7 +342,8 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 	XFree(classHint);
 
 	setTitle(dpy, win);
-	setDock(dpy, win);
+	if (cfg->dockType)
+		setDock(dpy, win);
 
 	XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask);
 	XMapWindow(dpy, win);
@@ -634,22 +629,22 @@ void reloadFonts(Model* model, Display* dpy, int screen) {
 
 // Initializes everything we need for drawing to a Window/XftDraw
 // TODO: might be able to ditch the xlib GCs in favor of using Xft lib's rectangle drawing
-GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg, char* selectedFg) {
+GfxContext* initColors(Display* dpy, int screen, XDConfig* cfg) {
 	GfxContext* ctx = malloc(sizeof(GfxContext));
 	ctx->pixels = malloc(3* sizeof(unsigned long));
 
 	Visual* visual = DefaultVisual(dpy, screen);
 	Colormap colormap = DefaultColormap(dpy,screen);
 	XftColor* fontColor = malloc(sizeof(XftColor));
-	if (!XftColorAllocName(dpy,visual,colormap,"#f2e750",fontColor)) {
-		printf("Failed to allocate xft color %s\n", selectedFg);
+	if (!XftColorAllocName(dpy,visual,colormap,cfg->fontColor,fontColor)) {
+		printf("Failed to allocate xft color %s\n", cfg->fontColor);
 		exit(1);
 	}
 	ctx->fontColor = fontColor;
 
 	// Set the background color of the selected window to something different
 	XColor parsedColor;
-	XParseColor(dpy, colormap, selectedFg, &parsedColor);
+	XParseColor(dpy, colormap, cfg->selectedColor, &parsedColor);
 	// TODO: Need to XFreeColors and XColor during cleanup
 	XAllocColor(dpy, colormap, &parsedColor);
 	ctx->pixels[0] = parsedColor.pixel;
@@ -665,7 +660,7 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	// Normal GC, used for drawing window previews
 	XGCValues gcv;
 	GC gc;
-	XParseColor(dpy, colormap, normalFg, &parsedColor);
+	XParseColor(dpy, colormap, cfg->desktopFg, &parsedColor);
 	XAllocColor(dpy, colormap, &parsedColor);
 	gcv.foreground = parsedColor.pixel; // Color used by fillRectangle
 	gcv.background = WhitePixel(dpy,screen); // Irrelevant rn
@@ -676,7 +671,7 @@ GfxContext* initColors(Display* dpy, int screen, char* normalFg, char* normalBg,
 	// Workspace GC, used to draw the worksapce and outline floating windows
 	XGCValues gcv_ws;
 	GC gc_ws;
-	XParseColor(dpy, colormap, normalBg, &parsedColor);
+	XParseColor(dpy, colormap, cfg->desktopBg, &parsedColor);
 	XAllocColor(dpy, colormap, &parsedColor);
 	gcv_ws.foreground = parsedColor.pixel; // Used for workspace bg and drawRectangle to match window border color
 	gcv_ws.background = WhitePixel(dpy,screen); // Irrelevant rn
@@ -872,6 +867,12 @@ char isWorkspaceWindow(Window* workspaces, int nWorkspaces, Window w) {
 }
 
 int main(int argc, char *argv[]) {
+	XDConfig* cfg = parseArgs(argc,argv);
+	if (cfg->navType)
+		navType = cfg->navType;
+	if (cfg->margin)
+		MARGIN = cfg->margin;
+
 	XSetErrorHandler(errorHandler);
 	Display *dpy;
 	int screen;
@@ -898,7 +899,6 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 
-
 	screen = DefaultScreen(dpy);
 	visual = DefaultVisual(dpy,screen);
 
@@ -913,10 +913,11 @@ int main(int argc, char *argv[]) {
 
 	int width_old = 160;
 	int height_old = 90;
-	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, &width_old, &height_old);
+	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, &width_old, &height_old, cfg);
 	
 	// TODO colors as configureable options.  Formatting
-	GfxContext* colorsCtx = initColors(dpy, screen, "rgb:4d/52/57", "rgb:1d/1f/21", "rgb:f2/e7/50");
+	//GfxContext* colorsCtx = initColors(dpy, screen, "#4d5257", "#1d1f21", "#f2e750", cfg->fontColor);
+	GfxContext* colorsCtx = initColors(dpy, screen, cfg);
 
 	// Create child windows for each workspace
 	// Don't necessarily need child windows, but we don't have to keep track of separate offsets this way
@@ -1105,5 +1106,18 @@ int main(int argc, char *argv[]) {
 	free(model);
 
 	cleanupList(miniWindows);
+	if (cfg->searchPrefix)
+		free(cfg->searchPrefix);
+	if (cfg->dockType)
+		free(cfg->dockType);
+	if (cfg->desktopFg)
+		free(cfg->desktopFg);
+	if (cfg->desktopBg)
+		free(cfg->desktopBg);
+	if (cfg->selectedColor)
+		free(cfg->selectedColor);
+	if (cfg->fontColor)
+		free(cfg->fontColor);
+	free(cfg);
 	return 0;
 }
