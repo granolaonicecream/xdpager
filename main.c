@@ -283,7 +283,7 @@ void setTitle(Display* dpy, Window w) {
 			8, PropModeReplace, (unsigned char*)title, strlen(title));
 }
 
-void setDock(Display* dpy, Window w) {
+void setDock(Display* dpy, Window w, XDConfig* cfg) {
 	
 	Atom cardinal = XInternAtom(dpy,"CARDINAL",False);
 	unsigned long allDesktops = 0xFFFFFFFF;
@@ -302,9 +302,25 @@ void setDock(Display* dpy, Window w) {
 
 	// TODO: configurable dock placement
 	long insets[12] = {0};
-	insets[3] = 100;
-	insets[10] = 0;
-	insets[11] = 2559;
+	if (cfg->dockType){
+		if (strcmp(cfg->dockType, "Bottom") == 0) {
+			insets[3] = cfg->height;
+			insets[10] = 0;
+			insets[11] = 2559;
+		} else if (strcmp(cfg->dockType, "Top") == 0) {
+			insets[2] = cfg->height;
+			insets[8] = 0;
+			insets[9] = 2559;
+		} else if (strcmp(cfg->dockType, "Left") == 0) {
+			insets[0] = cfg->width;
+			insets[4] = 0;
+			insets[5] = 1439;
+		} else if (strcmp(cfg->dockType, "Right") == 0) {
+			insets[1] = cfg->width;
+			insets[6] = 0;
+			insets[7] = 1439;
+		}
+	}
 	XChangeProperty(dpy, w,
 			XInternAtom(dpy, "_NET_WM_STRUT", False),
 			cardinal,
@@ -320,19 +336,27 @@ void setDock(Display* dpy, Window w) {
 
 int MARGIN = 2;
 Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, unsigned short workspacesPerRow,
-		int* return_width, int* return_height, XDConfig* cfg) {
-	/// TODO: Dynamically determine dimensions by scale factor, number of workspaces, and their layout
+		XDConfig* cfg) {
 	// This code was written with 16:9 2560x1440 monitors
-	*return_width =  ((160 + MARGIN * 2) * workspacesPerRow);
-	int nRows = nWorkspaces/workspacesPerRow;
-	if (nWorkspaces % workspacesPerRow != 0)
-		nRows += 1;
-	*return_height = (90 + MARGIN * 2) * nRows;
-
-	*return_width = 2560;
-	*return_height = 100;
+	int xPos = cfg->x;
+	int yPos = cfg->y;
+	if (cfg->dockType){
+		if (strcmp(cfg->dockType, "Bottom") == 0) {
+			xPos = (2560 - cfg->width)/2;
+			yPos = 1440 - cfg->height;
+		} else if (strcmp(cfg->dockType, "Top") == 0) {
+			xPos = (2560 - cfg->width)/2;
+			yPos = 0;
+		} else if (strcmp(cfg->dockType, "Left") == 0) {
+			xPos = 0;
+			yPos = (1440 - cfg->height)/2;
+		} else if (strcmp(cfg->dockType, "Right") == 0) {
+			xPos = 2560*2 - cfg->width;
+			yPos = (1440 - cfg->height)/2;
+		}
+	}
 	
-	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), 0, 1440 - *return_height, *return_width, *return_height, 
+	Window win = XCreateSimpleWindow(dpy, RootWindow(dpy, screen), xPos, yPos, cfg->width, cfg->height, 
 			0, BlackPixel(dpy, screen), BlackPixel(dpy, screen));
 	// Set metadata on the window before mapping
 	XClassHint *classHint = XAllocClassHint();
@@ -343,7 +367,7 @@ Window createMainWindow(Display *dpy, int screen, unsigned short nWorkspaces, un
 
 	setTitle(dpy, win);
 	if (cfg->dockType)
-		setDock(dpy, win);
+		setDock(dpy, win, cfg);
 
 	XSelectInput(dpy, win, ExposureMask | KeyPressMask | ButtonPressMask | ButtonReleaseMask);
 	XMapWindow(dpy, win);
@@ -615,9 +639,9 @@ void reloadFonts(Model* model, Display* dpy, int screen) {
 	XftFont** fonts = malloc(nFonts * sizeof(XftFont*));
 	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid", s);
 	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands", s);
-	fonts[2] = initFont(dpy, screen, "Liberation Sans", s);
+	fonts[2] = initFont(dpy, screen, "monospace", s);
 
-	XftFont* windowFont = initFont(dpy, screen, "Liberation Sans", s);
+	XftFont* windowFont = initFont(dpy, screen, "monospace", s);
 	XftFont** wFonts = malloc(nFonts * sizeof(XftFont*));
 	memcpy(wFonts,fonts,nFonts*sizeof(XftFont*));
 	wFonts[2] = windowFont;
@@ -911,12 +935,11 @@ int main(int argc, char *argv[]) {
 	// TODO: Xinerama to determine where we actually are
 	int currentDesktop = getCurrentDesktop(dpy);
 
-	int width_old = 160;
-	int height_old = 90;
-	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, &width_old, &height_old, cfg);
+	int width_old = cfg->width;
+	int height_old = cfg->height;
+	win = createMainWindow(dpy,screen, nWorkspaces, workspacesPerRow, cfg);
 	
 	// TODO colors as configureable options.  Formatting
-	//GfxContext* colorsCtx = initColors(dpy, screen, "#4d5257", "#1d1f21", "#f2e750", cfg->fontColor);
 	GfxContext* colorsCtx = initColors(dpy, screen, cfg);
 
 	// Create child windows for each workspace
@@ -1110,14 +1133,14 @@ int main(int argc, char *argv[]) {
 		free(cfg->searchPrefix);
 	if (cfg->dockType)
 		free(cfg->dockType);
-	if (cfg->desktopFg)
-		free(cfg->desktopFg);
-	if (cfg->desktopBg)
-		free(cfg->desktopBg);
-	if (cfg->selectedColor)
-		free(cfg->selectedColor);
-	if (cfg->fontColor)
-		free(cfg->fontColor);
+	//if (cfg->desktopFg)
+	//	free(cfg->desktopFg);
+	//if (cfg->desktopBg)
+	//	free(cfg->desktopBg);
+	//if (cfg->selectedColor)
+	//	free(cfg->selectedColor);
+	//if (cfg->fontColor)
+	//	free(cfg->fontColor);
 	free(cfg);
 	return 0;
 }

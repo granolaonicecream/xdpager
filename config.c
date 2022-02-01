@@ -18,10 +18,15 @@ typedef struct {
 
 XDConfig* defaultConfig() {
 	XDConfig* cfg = malloc(sizeof(XDConfig));
+	cfg->x = 0;
+	cfg->y = 0;
+	cfg->width = 400;
+	cfg->height = 300;
+	cfg->margin = 2;
 	cfg->desktopFg = "#4d5257";
 	cfg->desktopBg = "#1d1f21";
 	cfg->selectedColor = "#f2e750";
-	cfg->fontColor = "#f2e750";
+	cfg->fontColor = "#cfc542";
 	cfg->navType = 1;
 
 	return cfg;
