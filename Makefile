@@ -8,4 +8,4 @@ main: main.c
 	$(CC) $(CFLAGS) $(XFT_CFLAGS) $(LDFLAGS) $(XFT_LDFLAGS) main.c -o xdpager
 
 clean:
-	rm -f main
+	rm -f xdpager
