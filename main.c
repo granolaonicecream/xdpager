@@ -1012,7 +1012,6 @@ int main(int argc, char *argv[]) {
 	model->rawFont = cfg->font;
 	model->rawWindowFont = cfg->windowFont;
 
-	reloadFonts(model, dpy, screen);
 	handleResize(dpy, screen, model);
 
 	while(1) {

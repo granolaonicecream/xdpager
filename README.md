@@ -51,9 +51,9 @@ In search mode, the user can enter a text query that is equivalent to ``window.c
 | Escape | return to Desktop mode |
 
 # Configuration
-Config file loading is TBD; `man` pages are TBD; some options are hardcoded in `main.c`.  This means XDPager will need to be rebuilt in order to show certain changes.
+Config file loading is TBD; `man` pages are TBD;
 
-See `config.c` for options can be set by command line arguments.  Note that some of these arguments are long form only.
+See `config.c` for options that can be set by command line arguments.  Note that some of these arguments are long form only.
 
 ### navType
 Changes the behavior of moving the workspace selection.
@@ -66,17 +66,22 @@ Changes the behavior of moving the workspace selection.
  
 >  TODO: add videos demonstrating these differences
 
-### nWorkspaces
-The number of workspaces to render.  XDPager will only display workspaces [0, nWorkspaces].  This will be irrelvant if dynamic workspaces are ever implemented.
+### nDesktops
+The number of workspaces to render.  XDPager will only display workspaces [0, nDesktops].  This will be irrelvant if dynamic workspaces are ever implemented.
 
-### workspacesPerRow
-The number of workspaces to show per row in the grid.  If workspacesPerRow == nWorkspaces, XDPager renders a single row.  If workspacesPerRow == 1, XDPager renders a single column.
+### desktopsPerRow
+The number of workspaces to show per row in the grid.  If desktopsPerRow == nDesktops, XDPager renders a single row.  If desktopsPerRow == 1, XDPager renders a single column.
 
 ### searchPrefix
 The string prefix to indicates XDPager is in search mode.  This string supports UTF8.
 
 ### colors
-Everything is hardcoded.  Knock yourself out.
+See `config.h` for command line args `desktopBg`, `desktopFg`, `selectedColor`, and `fontColor`.
+
+### Fonts
+Fonts can be provided as a comma delimited string `font` in fallback order. A separate `windowFont` string of the same format is available if the window text should use a different set of fonts or fallback order.
+
+>Example: "monospace,Font Awesome 6 Free Solid" will use the `monospace` alias and fallback to Font Awesome for missing glyphs.
 
 # Project Details
 The following sections contain details you probably don't care about
