@@ -28,6 +28,8 @@ XDConfig* defaultConfig() {
 	cfg->selectedColor = "#f2e750";
 	cfg->fontColor = "#cfc542";
 	cfg->navType = 1;
+	cfg->nDesktops = 9;
+	cfg->desktopsPerRow = 3;
 
 	return cfg;
 }
@@ -50,6 +52,8 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 			{"desktopBg", required_argument, 0, 2},
 			{"selectedColor", required_argument, 0, 3},
 			{"fontColor", required_argument, 0, 4},
+			{"nDesktops", required_argument, 0, 5},
+			{"desktopsPerRow", required_argument, 0, 6},
 
 		};
 		int opt_idx = 0;
@@ -77,6 +81,12 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 			case 4:
 				cfg->fontColor = malloc(strlen(optarg));
 				strcpy(cfg->fontColor, optarg);
+				break;
+			case 5:
+				cfg->nDesktops = strtoul(optarg, NULL, 10);
+				break;
+			case 6:
+				cfg->desktopsPerRow = strtoul(optarg, NULL, 10);
 				break;
 			case 'd':
 				cfg->dockType = malloc(sizeof(char)*10);

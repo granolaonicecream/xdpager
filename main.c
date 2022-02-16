@@ -907,8 +907,8 @@ int main(int argc, char *argv[]) {
 	XEvent event;
 
 	// Config options
-	unsigned short nWorkspaces = 9;      // Number of workspaces/desktops
-	unsigned short workspacesPerRow =9;
+	unsigned short nWorkspaces = cfg->nDesktops;      // Number of workspaces/desktops
+	unsigned short workspacesPerRow = cfg->desktopsPerRow;
 	unsigned short maxWindows = 30;      // Maximum number of windows to preview (TODO: dynamic arrays)
 
 	SearchContext* search = malloc(sizeof(SearchContext));
