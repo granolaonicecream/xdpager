@@ -258,8 +258,10 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 
 	// Draw workspace labels
 	for(i=0; i<nWorkspaces; ++i) {
-		drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
-				m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
+		if (m->workspaceNames[i] != NULL) {
+			drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
+					m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
+		}
 	}
 
 	// TODO: customize where search string is drawn
@@ -637,8 +639,8 @@ void reloadFonts(Model* model, Display* dpy, int screen) {
 	// TODO: robustness, configurability, etc.
 	int nFonts = 3;
 	XftFont** fonts = malloc(nFonts * sizeof(XftFont*));
-	fonts[0] = initFont(dpy, screen, "Font Awesome 5 Free Solid", s);
-	fonts[1] = initFont(dpy, screen, "Font Awesome 5 Brands", s);
+	fonts[0] = initFont(dpy, screen, "Font Awesome 6 Free Solid", s);
+	fonts[1] = initFont(dpy, screen, "Font Awesome 6 Brands", s);
 	fonts[2] = initFont(dpy, screen, "monospace", s);
 
 	XftFont* windowFont = initFont(dpy, screen, "monospace", s);
