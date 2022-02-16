@@ -14,6 +14,8 @@ typedef struct {
 	char* desktopBg;
 	char* selectedColor;
 	char* fontColor;
+	char* font;
+	char* windowFont;
 } XDConfig;
 
 XDConfig* defaultConfig() {
@@ -30,6 +32,8 @@ XDConfig* defaultConfig() {
 	cfg->navType = 1;
 	cfg->nDesktops = 9;
 	cfg->desktopsPerRow = 3;
+	cfg->font= "Font Awesome 6 Free Solid,Font Awesome 6 Brands,monospace";
+	cfg->windowFont = NULL;
 
 	return cfg;
 }
@@ -54,6 +58,8 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 			{"fontColor", required_argument, 0, 4},
 			{"nDesktops", required_argument, 0, 5},
 			{"desktopsPerRow", required_argument, 0, 6},
+			{"font", required_argument, 0, 7},
+			{"windowFont", required_argument, 0, 8},
 
 		};
 		int opt_idx = 0;
@@ -87,6 +93,14 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 				break;
 			case 6:
 				cfg->desktopsPerRow = strtoul(optarg, NULL, 10);
+				break;
+			case 7:
+				cfg->font = malloc(strlen(optarg));
+				strcpy(cfg->font, optarg);
+				break;
+			case 8:
+				cfg->windowFont = malloc(strlen(optarg));
+				strcpy(cfg->windowFont, optarg);
 				break;
 			case 'd':
 				cfg->dockType = malloc(sizeof(char)*10);

@@ -31,8 +31,8 @@ typedef struct {
 
 typedef struct {
 	unsigned long* pixels;
-	XftFont** fonts; // Fonts in fallback order
-	XftFont** wFonts; // Fonts for optional window text
+	llist* fonts2; // Fonts in fallback order
+	llist* wFonts2; // Fonts for optional window text
 	int nFonts;
 	XftColor* fontColor;
 	GC selected;
@@ -74,6 +74,8 @@ typedef struct {
 	Window mainWindow; // for drawing the search string
 	Sizing* sizing;    // Information about the current size and scaling
 	GfxContext* gfx;
+	char* rawFont;			// TODO: refactor these somewhere more sensible
+	char* rawWindowFont;
 } Model;
 
 // TODO: how does control flow work here? Program keeps running 
@@ -154,7 +156,7 @@ void updateSearchContext(SearchContext* search, llist* previews) {
 	}
 }
 
-void drawUtfText(Display* dpy, XftDraw* draw, XftFont** fonts, int nFonts, XftColor* color, int x, int y,
+void drawUtfText(Display* dpy, XftDraw* draw, llist* fonts, XftColor* color, int x, int y,
 		char* text, int len, int w) {
 
 	int err, tw = 0;
@@ -165,14 +167,16 @@ void drawUtfText(Display* dpy, XftDraw* draw, XftFont** fonts, int nFonts, XftCo
 
 	for (t=text; t - text < len; t = next) {
 		next = utf8_decode(t, &rune, &err);
-		int i;
-		for (i=0; i<nFonts; ++i) {
-			if (XftCharExists(dpy, fonts[i] ,rune)) {
-				f = fonts[i];
+		node* ptr = fonts->head;
+		while (ptr != NULL) {
+			XftFont* font = ptr->data;
+			if (XftCharExists(dpy, font ,rune)) {
+				f = font;
 				break;
 			}
+			ptr = ptr->next;
 		}
-		if (i != nFonts) {
+		if (ptr != NULL) {
 			XftTextExtentsUtf8(dpy,f,(XftChar8*)t, next - t, &ext);
 			tw += ext.xOff;
 			if (w >= 0 && tw >= w) {
@@ -241,14 +245,14 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 				case 0: break; // No window text
 				case 1: 
 					if (mw.className)
-					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
-						colorsCtx->nFonts, colorsCtx->fontColor, 
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts2, 
+						colorsCtx->fontColor, 
 						mw.x, mw.y+pixelsize, mw.className, strlen(mw.className), mw.w);
 					break;
 				case 2:
 					if (mw.name)
-					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
-						colorsCtx->nFonts, colorsCtx->fontColor, 
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts2, 
+						colorsCtx->fontColor, 
 						mw.x, mw.y+pixelsize, mw.name, strlen(mw.name), mw.w);
 					break;
 			}
@@ -259,7 +263,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 	// Draw workspace labels
 	for(i=0; i<nWorkspaces; ++i) {
 		if (m->workspaceNames[i] != NULL) {
-			drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
+			drawUtfText(dpy, m->draws[i], colorsCtx->fonts2, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
 					m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
 		}
 	}
@@ -271,7 +275,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 		char sstring[search->size+prefixLen];
 		strcpy(sstring, search->prefix);
 		strcat(sstring,search->buffer);
-		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->nFonts, colorsCtx->fontColor, 10,20+pixelsize,
+		drawUtfText(dpy, m->draws[0], colorsCtx->fonts2, colorsCtx->fontColor, 10,20+pixelsize,
 			sstring, search->size + prefixLen, -1);
 	}
 }
@@ -609,11 +613,8 @@ char** getWorkspaceNames(Display* dpy, int screen, int nWorkspaces) {
 	return names;
 }
 
-XftFont* initFont(Display* dpy, int screen, char* fontName, Sizing* sizing) {
+XftFont* initFont(Display* dpy, int screen, char* fontName, int pixelsize) {
 	// Load Font to use
-	int minDimension = sizing->previewHeight < sizing->previewWidth ? 
-		sizing->previewHeight : sizing->previewWidth;
-	int pixelsize = minDimension / 9;
 	char fontWithSize[100*sizeof(char)];
 	sprintf(fontWithSize, "%s:pixelsize=%d", fontName, pixelsize);
 	XftFont* font = XftFontOpenName(dpy, screen, fontWithSize);
@@ -624,33 +625,38 @@ XftFont* initFont(Display* dpy, int screen, char* fontName, Sizing* sizing) {
 	return font;
 }
 
-void reloadFonts(Model* model, Display* dpy, int screen) {
-	GfxContext* ctx = model->gfx;
-
-	// cleanup. No need to free since # of fonts doesn't change
-	if (ctx->fonts) {
-		for (int i=0; i<ctx->nFonts; i++) {
-			XftFontClose(dpy, ctx->fonts[i]);
-		}
+void reloadFontList(llist* fontList, char* rawFont, Display* dpy, int screen, int pixelsize) {
+	// cleanup
+	while (fontList->size > 0) {
+		XftFont* data = llist_remove(fontList, 0);
+		XftFontClose(dpy, data);
 	}
 
-	Sizing* s = model->sizing;
-	// Load Fonts
-	// TODO: robustness, configurability, etc.
-	int nFonts = 3;
-	XftFont** fonts = malloc(nFonts * sizeof(XftFont*));
-	fonts[0] = initFont(dpy, screen, "Font Awesome 6 Free Solid", s);
-	fonts[1] = initFont(dpy, screen, "Font Awesome 6 Brands", s);
-	fonts[2] = initFont(dpy, screen, "monospace", s);
+	// Parse raw fonts (maybe cache the partial parse?)
+	char tmp[strlen(rawFont)];
+	strcpy(tmp, rawFont);
+	char* delimiter = ",";
+	char* ptr = strtok(tmp, delimiter);
+	while (ptr != NULL) {
+		XftFont* font = initFont(dpy, screen, ptr, pixelsize);
+		llist_addBack(fontList, font);
+		ptr = strtok(NULL,delimiter);
+	}
 
-	XftFont* windowFont = initFont(dpy, screen, "monospace", s);
-	XftFont** wFonts = malloc(nFonts * sizeof(XftFont*));
-	memcpy(wFonts,fonts,nFonts*sizeof(XftFont*));
-	wFonts[2] = windowFont;
+}
 
-	ctx->fonts = fonts;
-	ctx->nFonts = nFonts;
-	ctx->wFonts = wFonts;
+void reloadFonts(Model* model, Display* dpy, int screen) {
+	GfxContext* ctx = model->gfx;
+	Sizing* s = model->sizing; // used for pixelsize scaling
+	int minDimension = s->previewHeight < s->previewWidth ? 
+		s->previewHeight : s->previewWidth;
+	int pixelsize = minDimension / 9;
+
+	// Load Font(s) from a comma delimited string (not reentrant)
+	reloadFontList(ctx->fonts2, model->rawFont, dpy, screen, pixelsize);
+	if (ctx->fonts2 != ctx->wFonts2) {
+		reloadFontList(ctx->wFonts2, model->rawWindowFont, dpy, screen, pixelsize);
+	}
 }
 
 // Initializes everything we need for drawing to a Window/XftDraw
@@ -944,6 +950,11 @@ int main(int argc, char *argv[]) {
 	// TODO colors as configureable options.  Formatting
 	GfxContext* colorsCtx = initColors(dpy, screen, cfg);
 
+	// If no font provided for windows, use the regular font
+	// This saves some parsing time when we have to reload fonts
+	colorsCtx->fonts2 = llist_create();
+	colorsCtx->wFonts2 = (cfg->windowFont == NULL) ? colorsCtx->fonts2 : llist_create();
+
 	// Create child windows for each workspace
 	// Don't necessarily need child windows, but we don't have to keep track of separate offsets this way
 	// (preserve 16:9 ratio)
@@ -998,6 +1009,8 @@ int main(int argc, char *argv[]) {
 	model->workspacesPerRow = workspacesPerRow;
 	model->sizing = s;
 	model->gfx = colorsCtx;
+	model->rawFont = cfg->font;
+	model->rawWindowFont = cfg->windowFont;
 
 	reloadFonts(model, dpy, screen);
 	handleResize(dpy, screen, model);
