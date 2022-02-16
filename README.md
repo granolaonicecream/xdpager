@@ -20,6 +20,7 @@ The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspa
 ## Dependencies
 - libX11 (likely installed)
 - libXft and freetype2 (likely installed)
+- GNU's getopt_long (likely installed. complain if not and I'll rewrite arg parsing)
 - xdotool (commands to the window manager)
 
 # Usage
@@ -50,7 +51,9 @@ In search mode, the user can enter a text query that is equivalent to ``window.c
 | Escape | return to Desktop mode |
 
 # Configuration
-Config file loading is TBD; options are currently hardcoded in `main.c`.  This means XDPager will need to be rebuilt in order to show changes.
+Config file loading is TBD; `man` pages are TBD; some options are hardcoded in `main.c`.  This means XDPager will need to be rebuilt in order to show certain changes.
+
+See `config.c` for options can be set by command line arguments.  Note that some of these arguments are long form only.
 
 ### navType
 Changes the behavior of moving the workspace selection.
@@ -81,6 +84,7 @@ The following sections contain details you probably don't care about
 - Filtering limited to alphanumeric characters until I figure out how unicode keylogging works.
 - Number of desktops is statically defined.  Max number of windows is statically defined.  Dynamic desktop support should be possible with an extension watching the `_NET_NUM_DESKTOPS` atom on the root window.
 - Assumptions about monitors, X screen setup, and resolution are currently hardcoded to my setup (2x 2560x1440 monitors in a horizontal layout). Dynamic discovery and layout is on the backlog. Modify the scaling factor calculation for your resolution.
+- XFT font names are assumed right now.  Additionally, a pixelsize is dynamically appended to them based on the main window's size to allow the font size to be reasonable for any window dimensions.
 ### The problem with `_NET_CLIENT_LIST_STACKING`
  While XDPager relies on an EWMH compliant window manager, certain window managers (e.g. xmonad) don't fully comply with features they claim to support.  Ideally, XDPager could simply watch `_NET_CLIENT_LIST_STACKING` to determine which windows matter and which are above others.  However, when a window manager doesn't maintain correct stacking order in this list, there is no way to tell which windows should be drawn first without asking for the children of the root window.  Since the list of children has to be traversed anyway, XDPager just sources data from that.
 
