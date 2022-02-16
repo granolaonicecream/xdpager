@@ -31,8 +31,8 @@ typedef struct {
 
 typedef struct {
 	unsigned long* pixels;
-	llist* fonts2; // Fonts in fallback order
-	llist* wFonts2; // Fonts for optional window text
+	llist* fonts; // Fonts in fallback order
+	llist* wFonts; // Fonts for optional window text
 	int nFonts;
 	XftColor* fontColor;
 	GC selected;
@@ -245,13 +245,13 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 				case 0: break; // No window text
 				case 1: 
 					if (mw.className)
-					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts2, 
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
 						colorsCtx->fontColor, 
 						mw.x, mw.y+pixelsize, mw.className, strlen(mw.className), mw.w);
 					break;
 				case 2:
 					if (mw.name)
-					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts2, 
+					drawUtfText(dpy, m->draws[mw.workspace], colorsCtx->wFonts, 
 						colorsCtx->fontColor, 
 						mw.x, mw.y+pixelsize, mw.name, strlen(mw.name), mw.w);
 					break;
@@ -263,7 +263,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 	// Draw workspace labels
 	for(i=0; i<nWorkspaces; ++i) {
 		if (m->workspaceNames[i] != NULL) {
-			drawUtfText(dpy, m->draws[i], colorsCtx->fonts2, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
+			drawUtfText(dpy, m->draws[i], colorsCtx->fonts, colorsCtx->fontColor, 5, m->sizing->previewHeight-10,
 					m->workspaceNames[i], strlen(m->workspaceNames[i]), -1);
 		}
 	}
@@ -275,7 +275,7 @@ void redraw(Display *dpy, int screen, int margin, GfxContext* colorsCtx, Model* 
 		char sstring[search->size+prefixLen];
 		strcpy(sstring, search->prefix);
 		strcat(sstring,search->buffer);
-		drawUtfText(dpy, m->draws[0], colorsCtx->fonts2, colorsCtx->fontColor, 10,20+pixelsize,
+		drawUtfText(dpy, m->draws[0], colorsCtx->fonts, colorsCtx->fontColor, 10,20+pixelsize,
 			sstring, search->size + prefixLen, -1);
 	}
 }
@@ -653,9 +653,9 @@ void reloadFonts(Model* model, Display* dpy, int screen) {
 	int pixelsize = minDimension / 9;
 
 	// Load Font(s) from a comma delimited string (not reentrant)
-	reloadFontList(ctx->fonts2, model->rawFont, dpy, screen, pixelsize);
-	if (ctx->fonts2 != ctx->wFonts2) {
-		reloadFontList(ctx->wFonts2, model->rawWindowFont, dpy, screen, pixelsize);
+	reloadFontList(ctx->fonts, model->rawFont, dpy, screen, pixelsize);
+	if (ctx->fonts != ctx->wFonts) {
+		reloadFontList(ctx->wFonts, model->rawWindowFont, dpy, screen, pixelsize);
 	}
 }
 
@@ -952,8 +952,8 @@ int main(int argc, char *argv[]) {
 
 	// If no font provided for windows, use the regular font
 	// This saves some parsing time when we have to reload fonts
-	colorsCtx->fonts2 = llist_create();
-	colorsCtx->wFonts2 = (cfg->windowFont == NULL) ? colorsCtx->fonts2 : llist_create();
+	colorsCtx->fonts = llist_create();
+	colorsCtx->wFonts = (cfg->windowFont == NULL) ? colorsCtx->fonts : llist_create();
 
 	// Create child windows for each workspace
 	// Don't necessarily need child windows, but we don't have to keep track of separate offsets this way
