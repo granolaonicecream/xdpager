@@ -51,7 +51,22 @@ In search mode, the user can enter a text query that is equivalent to ``window.c
 | Escape | return to Desktop mode |
 
 # Configuration
-Config file loading is TBD; `man` pages are TBD;
+>`man` pages are TBD;  XResources loading is TBD;
+
+Configuration is loaded in a overwriting heirarchy of the following order:
+
+1. Hardcoded defaults in `config.c`
+2. Config file
+3. Command line arguments
+
+The config file can be provided by command line arg `-c` or `$XDG_CONFIG_HOME/xdpager/xdpager-rc`.  If no file is found, it is simply skipped.
+
+### Config File Format
+Each line of the config file should be one of the following:
+
+1. Comment that starts with `#`
+2. Empty line
+3. key=value
 
 See `config.c` for options that can be set by command line arguments.  Note that some of these arguments are long form only.
 

@@ -38,8 +38,7 @@ XDConfig* defaultConfig() {
 	return cfg;
 }
 
-XDConfig* parseArgs(int argc, char* argv[]) {
-	XDConfig* cfg = defaultConfig();
+void parseArgs(int argc, char* argv[], XDConfig* cfg) {
 	static int verbose_flag;
 	while(1) {
 		static struct option long_options[] = {
@@ -63,7 +62,7 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 
 		};
 		int opt_idx = 0;
-		int c = getopt_long(argc, argv, "d:x:y:w:h:t:m:", long_options, &opt_idx);
+		int c = getopt_long(argc, argv, "c:d:x:y:w:h:t:m:", long_options, &opt_idx);
 		if (c == -1)
 			break;
 		switch(c) {
@@ -102,6 +101,9 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 				cfg->windowFont = malloc(strlen(optarg));
 				strcpy(cfg->windowFont, optarg);
 				break;
+			case 'c':
+				// config file determined elsewhere
+				break;
 			case 'd':
 				cfg->dockType = malloc(sizeof(char)*10);
 				strcpy(cfg->dockType, optarg);
@@ -133,5 +135,105 @@ XDConfig* parseArgs(int argc, char* argv[]) {
 		}
 
 	}
+}
+
+// Assume config file lives in $HOME/.config/xdpager/xdpagerrc
+int parseline(char* line, XDConfig* config) {
+	char key[100];
+	char* delim = "=\n";
+	char* token;
+
+	// empty line or comment
+	if (sscanf(line, " %s", key) == EOF)
+		return 0;
+	if (sscanf(line, " %[#]", key))
+		return 0;
+
+	token = strtok(line, delim);
+	if (token != NULL) {
+		strcpy(key,token);
+		token = strtok(NULL, delim);
+		//printf("%s,%s\n", key, token);
+
+		if (strcmp(key, "desktopFg") == 0) {
+			config->desktopFg = malloc(sizeof(char) * strlen(token));
+			strcpy(config->desktopFg, token);
+		} else if (strcmp(key, "desktopBg") == 0) {
+			config->desktopBg = malloc(sizeof(char) * strlen(token));
+			strcpy(config->desktopBg, token);
+		} else if (strcmp(key, "selectedColor") == 0) {
+			config->selectedColor = malloc(sizeof(char) * strlen(token));
+			strcpy(config->selectedColor, token);
+		} else if (strcmp(key, "fontColor") == 0) {
+			config->fontColor= malloc(sizeof(char) * strlen(token));
+			strcpy(config->fontColor, token);
+		} else if (strcmp(key, "font") == 0) {
+			config->font = malloc(sizeof(char) * strlen(token));
+			strcpy(config->font, token);
+		} else if (strcmp(key, "windowFont") == 0) {
+			config->windowFont = malloc(sizeof(char) * strlen(token));
+			strcpy(config->windowFont, token);
+		} else if (strcmp(key, "nDesktops") == 0) {
+			config->nDesktops = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "desktopsPerRow") == 0) {
+			config->desktopsPerRow = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "xPos") == 0) {
+			config->x = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "xPos") == 0) {
+			config->y = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "width") == 0) {
+			config->width = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "height") == 0) {
+			config->height = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "margin") == 0) {
+			config->margin = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "navType") == 0) {
+			config->navType = strtoul(token, NULL, 10);
+		} else if (strcmp(key, "searchPrefix") == 0) {
+			config->searchPrefix = malloc(sizeof(char) * strlen(token));
+			strcpy(config->searchPrefix, token);
+		} else {
+			printf("Unrecognized property %s, skipping\n", key);
+		}
+		return 0;
+		
+	}
+
+	return 1;
+}
+
+void parseConfigFile(XDConfig* config, char* path) {
+	FILE *f = fopen(path, "r");
+	char line[256];
+
+	while (fgets(line, 256, f)) {
+		parseline(line, config);
+	}
+}
+
+XDConfig* getConfig(int argc, char* argv[]) {
+	// get default configuration
+	XDConfig* cfg = defaultConfig();
+	// get config from file
+	// If provided with path, use it.  Otherwise use $XDG_CONFIG_DIR
+	// yes, yes, O(n)
+	char* prefix = getenv("XDG_CONFIG_HOME");
+	if (prefix == NULL) {
+		prefix = getenv("HOME");
+	}
+	char path[200];
+        sprintf(path, "%s/.config/xdpager/xdpager-rc", prefix);
+	for (int i=0; i<argc; i++) {
+		if (strcmp(argv[i], "-c") == 0) {
+			sprintf(path, "%s", argv[i+1]);
+			break;	
+		}
+	}
+//	printf("path = %s\n", path);
+	parseConfigFile(cfg, path);
+	
+	// parse any remaining command line args
+	parseArgs(argc, argv, cfg);
+
 	return cfg;
 }

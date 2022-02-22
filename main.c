@@ -899,7 +899,7 @@ char isWorkspaceWindow(Window* workspaces, int nWorkspaces, Window w) {
 }
 
 int main(int argc, char *argv[]) {
-	XDConfig* cfg = parseArgs(argc,argv);
+	XDConfig* cfg = getConfig(argc,argv);
 	if (cfg->navType)
 		navType = cfg->navType;
 	if (cfg->margin)
