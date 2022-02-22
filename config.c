@@ -179,7 +179,7 @@ int parseline(char* line, XDConfig* config) {
 			config->desktopsPerRow = strtoul(token, NULL, 10);
 		} else if (strcmp(key, "xPos") == 0) {
 			config->x = strtoul(token, NULL, 10);
-		} else if (strcmp(key, "xPos") == 0) {
+		} else if (strcmp(key, "yPos") == 0) {
 			config->y = strtoul(token, NULL, 10);
 		} else if (strcmp(key, "width") == 0) {
 			config->width = strtoul(token, NULL, 10);

@@ -1,0 +1,11 @@
+# Common configuration.  Overwrite with command line args
+windowFont=monospace,Font Awesome 6 Free Solid
+desktopBg=#351409
+desktopFg=#a15501
+fontColor=#fdd870
+selectedColor=#d0902f
+desktopsPerRow=5
+xPos=300
+yPos=400
+width=1000
+
