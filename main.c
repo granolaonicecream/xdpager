@@ -11,6 +11,7 @@
 #include "utf8.h"
 #include "llist.c"
 #include "config.c"
+#include "multihead.c"
 
 #define NAV_NORMAL_SELECTION 1
 #define NAV_MOVE_WITH_SELECTION 2
@@ -55,12 +56,11 @@ typedef struct {
 	int previewHeight; 
 	int width;	   // Dimensions of the main window
 	int height;	   
-	double s_x;	   // Scaling factors of previews
-	double s_y;	   
 } Sizing;
 
 typedef struct {
-	llist* previews;
+	llist* monitors;    // The list of connected Monitors
+	llist* previews;    // The list of MiniWindows
 	Window* workspaces; // array of desktops
 	char** workspaceNames; // names of workspaces (assumes same size and order as workspaces)
 	XftDraw** draws;  // XFT draw surface for strings. size == nWorkspaces
@@ -514,19 +514,47 @@ long getWmState(Display* dpy, Window w, int* return_nitems) {
 }
 
 MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height, 
-		char* className, char* name, Window window, double s_x, double s_y) {
+		char* className, char* name, Window window, Sizing* sizing, llist* monitors) {
 
-	// normalize coordinates TODO: dynamic
-	if (x >= 2560) 
-		x -= 2560;
+	double s_x, s_y; // Scale factors based on monitor resolution
+
+	// With the set of Monitors, we can construct ranges to determine 
+	// which monitor a window is on.  The monitor's offset is used to
+	// normalize the window coordinates to (0,0) and to scale it
+	//
+	node* ptr =  monitors->head;
+	Monitor* mtr;
+	while (ptr != NULL) {
+		mtr = ptr->data;
+		int left_x = mtr->x_offset;
+		int right_x = left_x + mtr->width;
+		int top_y = mtr->y_offset;
+		int bottom_y = top_y + mtr->height;
+
+		if (x >= left_x && x <= right_x && y >= top_y && y <= bottom_y) {
+			s_x = ((double)mtr->width) / sizing->previewWidth;
+			s_y = ((double)mtr->height) / sizing->previewHeight;
+			// DEBUGGING INFO
+			// printf("Window %s is on monitor %d %d\n", className, mtr->x_offset, mtr->y_offset);
+//			printf("%d,%d -> %d,%d %d %f %f\n", x,y, x-mtr->x_offset, y-mtr->y_offset, sizing->previewWidth, s_x, s_y);
+			x -= mtr->x_offset;
+			y -= mtr->y_offset;
+			break;
+		}
+		ptr = ptr->next;
+	}
+	// TODO: Edge cases
+	// 1. window origin is offscreen (coordinates not on any monitor)
+	//    Consider only the visible rectangle
+	// 2. window spans multiple monitors
+	//    Break apart into multiple MiniWindows linked together?
+	
 
 	// destructive but who cares
 	for(char* p=className; *p; p++) *p = tolower(*p);
 
 	// Scale factor is divisor
 	MiniWindow* mw = malloc(sizeof(MiniWindow));
-	if (mw == NULL)
-		puts("Uh oh makeMiniWindow");
 	mw->workspace = workspace;
 	mw->x = x / s_x;
 	mw->y = y / s_y;
@@ -539,7 +567,7 @@ MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height,
 	return mw;
 }
 
-llist* testX(Display* dpy, double s_x, double s_y) {
+llist* testX(Display* dpy, Sizing* sizing, llist* monitors) {
 	Window root;
 	Window parent;
 	Window *children;
@@ -564,7 +592,7 @@ llist* testX(Display* dpy, double s_x, double s_y) {
 	//			className, name, children[a]);
 			MiniWindow* mw = makeMiniWindow(desktop,
 				wattr.x, wattr.y, wattr.width, wattr.height, 
-				className, name, children[a], s_x, s_y);
+				className, name, children[a], sizing, monitors);
 			llist_addBack(miniWindows,mw);
 		}
 	}
@@ -734,16 +762,6 @@ void cleanupList(llist* list) {
 	free(list);
 }
 
-// assumes preview window dimensions already set
-void setPreviewScaling(Model* model) {
-	int nRows = model->nWorkspaces / model->workspacesPerRow;
-	if (model->nWorkspaces % model->workspacesPerRow != 0)
-		nRows++;
-	Sizing* s = model->sizing;
-	s->s_x = 2560.0 /  s->previewWidth;
-	s->s_y = 1440.0 / s->previewHeight;
-	// printf("s_x s_y %f %f\n", s->s_x, s->s_y);
-}
 
 // If the main window has been resized, adjust the child windows aspect ratio,
 // no matter how dumb it looks
@@ -774,9 +792,8 @@ void resizeWorkspaceWindows(Display* dpy, Model* m) {
 
 void handleResize(Display* dpy, int screen, Model* model) {
 	resizeWorkspaceWindows(dpy, model);
-	setPreviewScaling(model);
 	cleanupList(model->previews);
-	model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
+	model->previews = testX(dpy, model->sizing, model->monitors);
 	reloadFonts(model, dpy, screen);
 //	printf("w,h %d,%d\n", model->sizing->width, model->sizing->height);
 }
@@ -898,6 +915,7 @@ char isWorkspaceWindow(Window* workspaces, int nWorkspaces, Window w) {
 	return 0;
 }
 
+
 int main(int argc, char *argv[]) {
 	XDConfig* cfg = getConfig(argc,argv);
 	if (cfg->navType)
@@ -933,6 +951,9 @@ int main(int argc, char *argv[]) {
 
 	screen = DefaultScreen(dpy);
 	visual = DefaultVisual(dpy,screen);
+
+	// Get Multihead geometry for coordinate normalization
+	llist* monitors = getMonitors(dpy);
 
 	// Set Root window to notify us of its child windows' events
 	XSetWindowAttributes attrs;
@@ -979,23 +1000,20 @@ int main(int argc, char *argv[]) {
 	// Get readable workspace names 
 	char** workspaceNames = getWorkspaceNames(dpy, screen, nWorkspaces);
 
-	// Allocate an array of the actual windows to draw.
-	// Geometry for each set of windows should be relative to its display's origin
-	double s_x = 16;
-	double s_y = 16;
-	llist* miniWindows = testX(dpy, s_x, s_y);
-
 	// Size/scale info
 	Sizing* s = malloc(sizeof(Sizing));
 	s->width = width_old;
 	s->height = height_old;
-	s->s_x = s_x;
-	s->s_y = s_y;
 	s->previewWidth = width;
 	s->previewHeight = height;	
 
+	// Allocate an array of the actual windows to draw.
+	// Geometry for each set of windows should be relative to its display's origin
+	llist* miniWindows = testX(dpy, s, monitors);
+
 	// Collect all this shit together for organization
 	Model* model = malloc(sizeof(Model));
+	model->monitors = monitors;
 	model->workspaces = workspaces;
 	model->workspaceNames = workspaceNames;
 	model->draws = draws;
@@ -1035,7 +1053,7 @@ int main(int argc, char *argv[]) {
 					handleResize(dpy, screen, model);
 				} else {
 					cleanupList(model->previews);
-					model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
+					model->previews = testX(dpy, model->sizing, model->monitors);
 				}
 			} else if (isWorkspaceWindow(workspaces, nWorkspaces, event.xconfigure.window)) {
 				printf("notify on child window 0x%lx\n", event.xconfigure.window);
@@ -1043,7 +1061,7 @@ int main(int argc, char *argv[]) {
 				// Some other window has changed size
 				// Don't need to update our layout or scaling, just the list of previews
 				cleanupList(model->previews);
-				model->previews = testX(dpy, model->sizing->s_x, model->sizing->s_y);
+				model->previews = testX(dpy, model->sizing, model->monitors);
 			}
 			redraw(dpy,screen,MARGIN,colorsCtx,model);
 		}
@@ -1155,6 +1173,8 @@ int main(int argc, char *argv[]) {
 	//	free(cfg->selectedColor);
 	//if (cfg->fontColor)
 	//	free(cfg->fontColor);
+	
+	free(monitors); // TODO: genericize cleanupList 
 	free(cfg);
 	return 0;
 }

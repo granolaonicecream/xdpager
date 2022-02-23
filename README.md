@@ -20,6 +20,7 @@ The X(org)D(esktop)Pager is an attempt at writing a pager similar to the workspa
 ## Dependencies
 - libX11 (likely installed)
 - libXft and freetype2 (likely installed)
+- libXinerama (detect multihead setups)
 - GNU's getopt_long (likely installed. complain if not and I'll rewrite arg parsing)
 - xdotool (commands to the window manager)
 
@@ -103,7 +104,6 @@ The following sections contain details you probably don't care about
 ### Limitations
 - Filtering limited to alphanumeric characters until I figure out how unicode keylogging works.
 - Number of desktops is statically defined.  Max number of windows is statically defined.  Dynamic desktop support should be possible with an extension watching the `_NET_NUM_DESKTOPS` atom on the root window.
-- Assumptions about monitors, X screen setup, and resolution are currently hardcoded to my setup (2x 2560x1440 monitors in a horizontal layout). Dynamic discovery and layout is on the backlog. Modify the scaling factor calculation for your resolution.
 - XFT font names are assumed right now.  Additionally, a pixelsize is dynamically appended to them based on the main window's size to allow the font size to be reasonable for any window dimensions.
 ### The problem with `_NET_CLIENT_LIST_STACKING`
  While XDPager relies on an EWMH compliant window manager, certain window managers (e.g. xmonad) don't fully comply with features they claim to support.  Ideally, XDPager could simply watch `_NET_CLIENT_LIST_STACKING` to determine which windows matter and which are above others.  However, when a window manager doesn't maintain correct stacking order in this list, there is no way to tell which windows should be drawn first without asking for the children of the root window.  Since the list of children has to be traversed anyway, XDPager just sources data from that.
@@ -114,6 +114,7 @@ Most window managers that comply with EWMH shouldn't have a problem.
 - `WM_CLASS` to determine the className for a window
 - `_NET_WM_DESKTOP` to determine which desktop a window is on
 - `_NET_DESKTOP_NAMES` to determine the names of the desktops
+- `_NET_CURRENT_DESKTOP` to determine the initial selected desktop
 
 # FAQ
 > Why doesn't XDPager have live window content previews?  Gnome/Cinnamon/whoever has a real fullscreen exposé feature!
