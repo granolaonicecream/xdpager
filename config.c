@@ -203,11 +203,14 @@ int parseline(char* line, XDConfig* config) {
 }
 
 void parseConfigFile(XDConfig* config, char* path) {
-	FILE *f = fopen(path, "r");
-	char line[256];
+	FILE *f;
+        if ( (f	= fopen(path, "r")) != NULL) {
+		char line[256];
 
-	while (fgets(line, 256, f)) {
-		parseline(line, config);
+		while (fgets(line, 256, f)) {
+			parseline(line, config);
+		}
+		fclose(f);
 	}
 }
 
