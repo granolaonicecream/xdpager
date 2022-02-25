@@ -531,12 +531,12 @@ MiniWindow* makeMiniWindow(int workspace, int x, int y, int width, int height,
 		int top_y = mtr->y_offset;
 		int bottom_y = top_y + mtr->height;
 
-		if (x >= left_x && x <= right_x && y >= top_y && y <= bottom_y) {
+		if (x >= left_x && x < right_x && y >= top_y && y < bottom_y) {
 			s_x = ((double)mtr->width) / sizing->previewWidth;
 			s_y = ((double)mtr->height) / sizing->previewHeight;
 			// DEBUGGING INFO
 			// printf("Window %s is on monitor %d %d\n", className, mtr->x_offset, mtr->y_offset);
-//			printf("%d,%d -> %d,%d %d %f %f\n", x,y, x-mtr->x_offset, y-mtr->y_offset, sizing->previewWidth, s_x, s_y);
+			// printf("%s (%d,%d) -> (%d,%d) %d %f %f\n", className, x,y, x-mtr->x_offset, y-mtr->y_offset, sizing->previewWidth, s_x, s_y);
 			x -= mtr->x_offset;
 			y -= mtr->y_offset;
 			break;
