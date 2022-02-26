@@ -1076,6 +1076,26 @@ int main(int argc, char *argv[]) {
 			}
 		}
 
+		// Destroy events
+		// Redraw if a window we know about is destroyed
+		// Reason for filtering is we get DestroyNotify events for non-relevant
+		// sub-windows that cause useless redraws.
+		if (event.type == DestroyNotify) {
+			node* ptr = model->previews->head;
+			while (ptr != NULL) {
+				MiniWindow* mw = (MiniWindow*) ptr->data;
+				if (mw->windowId == event.xdestroywindow.window) {
+					break;
+				}
+				ptr = ptr->next;
+			}
+			if (ptr != NULL) {
+				cleanupList(model->previews);
+				model->previews = testX(dpy, model->sizing, model->monitors);
+				redraw(dpy,screen,MARGIN,colorsCtx,model);
+			}
+		}
+
 		// Key events
 		if (event.type == KeyPress) {
 			KeySym sym = XLookupKeysym(&event.xkey, 0);
