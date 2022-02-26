@@ -941,6 +941,7 @@ int main(int argc, char *argv[]) {
 	search->matchedWindows = malloc(maxWindows * sizeof(MiniWindow*)); // array for windows that match search string
 								       // Overeager alloc, but lol dynamic arrays
 	search->nMatched = 0;			// length of matchedWindows
+	search->size = 0;
 	search->prefix = "";
 
 	dpy = XOpenDisplay(NULL);
